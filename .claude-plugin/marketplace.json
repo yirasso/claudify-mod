@@ -1,0 +1,7 @@
+{
+  "name": "tomas-plugins",
+  "owner": { "name": "Tomas Girao" },
+  "plugins": [
+    { "name": "usage-board", "source": "./", "description": "Claude usage limits, project actions and the session's skills, MCP servers, connectors and plugins in a pane" }
+  ]
+}
