@@ -15,9 +15,10 @@ The owner is Tomás. He talks in European Portuguese (never Brazilian); the plug
   - **To ship a change:** bump `version` in `.claude-plugin/plugin.json`, commit, push to `main`, then `claude plugin update claudify@tomas-plugins` and `/reload-plugins`.
   - **To try edits before pushing:** `claude --plugin-dir C:\Dev\Claudify`.
 - **The `claude` CLI is not on PATH.** The binary is `%APPDATA%\Claude\claude-code\<version>\<hash>\claude.exe` (it was `2.1.293\83cb0bd7fed4` on 9 Oct 2026).
+- **Every change ships.** After each change (the three checks below passing): bump `version`, commit, push to `main`, `claude plugin update claudify@tomas-plugins` and `/reload-plugins`, so Tomás sees it in Claude straight away. No separate HTML mock-up: the UI is designed directly in `hooks/cards.ts` and `hooks/register.tsx`.
 - **Before finishing a change**, all three must pass:
   - `claude plugin validate .`
-  - `claude plugin test .` (16 tests, 5 files)
+  - `claude plugin test .` (17 tests, 6 files)
   - the typecheck: `npx -y -p typescript tsc -p tsconfig.json` (TypeScript is not installed in the repo, so plain `npx tsc` fails), against the API types in `.claude-plugin/types/`. That folder is generated and git-ignored; the plugin-authoring skill regenerates it.
 - **For the API, load the `plugin-authoring` skill** before touching the hooks: it has the full contract.
 
@@ -28,11 +29,11 @@ The owner is Tomás. He talks in European Portuguese (never Brazilian); the plug
   - **Events handled:** `session.start`, `command.run` (`/claudify`, which toggles the pane), `session.measure`, `skill.prompt`, `tool.call`, `turn.complete`, `ui.render`, `ui.close`, `session.end`.
   - **What it renders:** `Pane` (the board) and `AbovePrompt` (the «Show/Hide Claude panel» band button, desktop).
   - **Its functions:** `refresh` (every 10 s, via `$.clock.every`), `readProject`, `runScript`/`stopScript`/`killTree`, `prepareGithub`/`runGithub` (the commit message comes from `$.model.complete` with Sonnet 5.5 at medium effort, and nothing runs before the user confirms), `openPane` and `guessConnector` (claude.ai connectors arrive as UUIDs, so their names are guessed).
-- `hooks/cards.ts`: `dashboard(d)` returns one 480-wide SVG, with `usage()`, `score()` and `insights()`.
+- `hooks/cards.ts`: `dashboard(d)` returns one 480-wide SVG (the actions tile with four squares, usage rings, project hero, repository and context tiles); `actionsBar(running)` is the slim version of the actions tile for the band above the prompt. Real `Button`s (Start/Stop Project, Save Changes, Setup Project, Compact) are laid over the squares' labels by `actionButtons` in `register.tsx`.
   - The style is copied from Tomás's reference: https://dribbble.com/shots/26970884-Investment-Dashboard-Widget (light cards, rounded bars, a score arc).
   - It shows on desktop only, as `<Svg>`. The terminal gets a text version.
 - `types/index.d.ts`: the state contract (`PluginState`). The atoms are `limits`, `skills`, `servers`, `busy`, `used`, `tick`, `project`, `runs`, `open`, `github`, `context` and `paneOpen`.
-- `tests/`: `board`, `checks`, `connectors`, `github`, `scripts`.
+- `tests/`: `actions`, `board`, `checks`, `connectors`, `github`, `scripts`.
 
 ## Rules learned the hard way
 

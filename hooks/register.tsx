@@ -6,7 +6,7 @@
 import { atom, read, update } from 'claude-code'
 import type { ElementConstructor, EngineInterface, Register, RenderChildren, SvgProps } from 'claude-code'
 
-import { dashboard } from './cards'
+import { actionsBar, dashboard } from './cards'
 
 import type { GithubFlow, GithubPlan, Limit, ProjectScripts, ScriptRun, ServerRow, SkillRow } from '../types'
 
@@ -400,6 +400,47 @@ async function isPaneOpen($: EngineInterface): Promise<boolean> {
   }
 }
 
+type Ui = ReturnType<EngineInterface['ui']['resolve']>
+
+/**
+ * The four actions (Start/Stop Project, Save Changes, Setup Project, Compact), shared by the pane and the
+ * band above the prompt. With `overlay` (desktop) they are plain labels laid over a drawn tile and the ones
+ * that cannot act show as dim text; on the terminal they are real buttons, or nothing.
+ */
+function actionButtons($: EngineInterface, ui: Ui, overlay: boolean, proj: ProjectScripts, scriptRuns: Record<string, ScriptRun>, gh: GithubFlow) {
+  const { Button, Text } = ui
+  // Start Project runs the dev script, or the start script when there is no dev.
+  const mainScript = proj.names.includes('dev') ? 'dev' : proj.names.includes('start') ? 'start' : (proj.names[0] ?? null)
+  const mainRun = mainScript ? scriptRuns[mainScript] : undefined
+  const look = overlay ? { plain: true as const } : {}
+  const startButton = mainScript ? (
+    <Button
+      key={`script:${mainScript}`}
+      variant={mainRun?.status === 'running' ? 'secondary' : 'primary'}
+      {...look}
+      label={mainRun?.status === 'stopping' ? 'Stopping…' : mainRun?.status === 'running' ? 'Stop Project' : 'Start Project'}
+      onPress={() => void (mainRun?.status === 'running' ? stopScript($, mainScript) : mainRun?.status === 'stopping' ? undefined : runScript($, mainScript))}
+    />
+  ) : overlay ? (
+    <Text dimColor>Start Project</Text>
+  ) : null
+  const saveButton =
+    gh.phase === 'idle' || gh.phase === 'done' || gh.phase === 'error' ? (
+      <Button key="github:start" variant="secondary" {...look} label="Save Changes" onPress={() => void prepareGithub($)} />
+    ) : overlay ? (
+      <Text dimColor>Save Changes</Text>
+    ) : null
+  const setupButton =
+    !proj.graphify || !proj.ponytail ? (
+      <Button key="project:setup" variant="secondary" {...look} label="Setup Project" onPress={() => void $.prompt.submit({ text: setupPrompt(proj) })} />
+    ) : overlay ? (
+      <Text dimColor>Setup Project</Text>
+    ) : null
+  // Compact is the same call /compact makes; it is refused while a turn runs, which is not worth a message.
+  const compactButton = <Button key="session:compact" variant="secondary" {...look} label="Compact" onPress={() => void $.session.compact().catch(() => undefined)} />
+  return { startButton, saveButton, setupButton, compactButton, mainRun }
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
@@ -444,8 +485,9 @@ export const register: Register = on => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
     const { Box, Button } = $.ui.resolve(e)
+    const Svg = e.surface === 'desktop' ? ((($.ui.resolve(e) as unknown) as { Svg?: ElementConstructor<SvgProps> }).Svg ?? null) : null
     const isOpen = await read($, paneOpen)
-    return (
+    const toggle = (
       <Box flexDirection="row" justifyContent="flex-end">
         <Button
           key="band:toggle"
@@ -454,6 +496,28 @@ export const register: Register = on => {
           label={isOpen ? '◧ Hide Claude panel' : '◧ Show Claude panel'}
           onPress={() => void (isOpen ? closePane($) : openPane($))}
         />
+      </Box>
+    )
+    if (!Svg) return toggle
+    // The pane's top widget (the actions tile) again, so the buttons are at hand without the pane open.
+    const proj = await read($, project)
+    const scriptRuns = await read($, runs)
+    const gh = await read($, github)
+    const { startButton, saveButton, setupButton, compactButton, mainRun } = actionButtons($, $.ui.resolve(e), true, proj, scriptRuns, gh)
+    return (
+      <Box flexDirection="column">
+        {toggle}
+        <Box position="relative" flexDirection="column" alignSelf="flex-start">
+          <Svg source={actionsBar(mainRun?.status === 'running')} alt="Actions: start or stop the project, save changes, set up the project, compact the conversation" />
+          {/* The labels' row of the tile (3 rows down, the four columns): real buttons over the drawing. */}
+          <Box position="absolute" top={3} left={0} right={0} flexDirection="row">
+            {[startButton, saveButton, setupButton, compactButton].map(b => (
+              <Box width="25%" justifyContent="center">
+                {b}
+              </Box>
+            ))}
+          </Box>
+        </Box>
       </Box>
     )
   })
@@ -664,35 +728,9 @@ export const register: Register = on => {
           { text: '.' },
         ]
       : [{ text: 'No GitHub repository yet. ' }, { text: proj.git === false ? 'Create one' : 'Publish this repo', bold: true }, { text: ' with the button below.' }]
-    // Start Project runs the dev script, or the start script when there is no dev.
-    const mainScript = proj.names.includes('dev') ? 'dev' : proj.names.includes('start') ? 'start' : (proj.names[0] ?? null)
-    const mainRun = mainScript ? scriptRuns[mainScript] : undefined
-    // The three actions. On the desktop they are plain labels laid over the dashboard's actions tile (the tile
+    // The four actions. On the desktop they are plain labels laid over the dashboard's actions tile (the tile
     // draws the squares; an SVG cannot be pressed), on the terminal a row of buttons.
-    const look = Svg ? { plain: true as const } : {}
-    const startButton = mainScript ? (
-      <Button
-        key={`script:${mainScript}`}
-        variant={mainRun?.status === 'running' ? 'secondary' : 'primary'}
-        {...look}
-        label={mainRun?.status === 'stopping' ? 'Stopping…' : mainRun?.status === 'running' ? 'Stop Project' : 'Start Project'}
-        onPress={() => void (mainRun?.status === 'running' ? stopScript($, mainScript) : mainRun?.status === 'stopping' ? undefined : runScript($, mainScript))}
-      />
-    ) : Svg ? (
-      <Text dimColor>Start Project</Text>
-    ) : null
-    const saveButton =
-      gh.phase === 'idle' || gh.phase === 'done' || gh.phase === 'error' ? (
-        <Button key="github:start" variant="secondary" {...look} label="Save Changes" onPress={() => void prepareGithub($)} />
-      ) : Svg ? (
-        <Text dimColor>Save Changes</Text>
-      ) : null
-    const setupButton =
-      !proj.graphify || !proj.ponytail ? (
-        <Button key="project:setup" variant="secondary" {...look} label="Setup Project" onPress={() => void $.prompt.submit({ text: setupPrompt(proj) })} />
-      ) : Svg ? (
-        <Text dimColor>Setup Project</Text>
-      ) : null
+    const { startButton, saveButton, setupButton, compactButton, mainRun } = actionButtons($, $.ui.resolve(e), !!Svg, proj, scriptRuns, gh)
     const runningScripts = Object.values(scriptRuns).filter(r => r.status === 'running').length
 
     return (
@@ -732,10 +770,10 @@ export const register: Register = on => {
             })}
             alt={`Usage: ${lims.map(l => `${LIMIT_NAMES[l.kind] ?? l.kind} ${Math.round(l.percentUsed)}%`).join(', ') || 'no reading yet'}. Project: ${checksOk} of 3 set up.`}
           />
-          {/* The labels' row of the actions tile (8 rows down, the three columns): real buttons over the drawing. */}
+          {/* The labels' row of the actions tile (8 rows down, the four columns): real buttons over the drawing. */}
           <Box position="absolute" top={8} left={0} right={0} flexDirection="row">
-            {[startButton, saveButton, setupButton].map(b => (
-              <Box width="33%" justifyContent="center">
+            {[startButton, saveButton, setupButton, compactButton].map(b => (
+              <Box width="25%" justifyContent="center">
                 {b}
               </Box>
             ))}
@@ -783,6 +821,7 @@ export const register: Register = on => {
               {startButton}
               {saveButton}
               {setupButton}
+              {compactButton}
             </Box>
           )}
           {proj.names.map(name => {

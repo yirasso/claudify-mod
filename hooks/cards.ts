@@ -1,7 +1,6 @@
 // The pane's dashboard, as one SVG, after Shamnad's "Infinity Widgets" (Dribbble 27235886 and 27236345):
 // pure black, flat #262626 tiles with big radii, ring gauges, a red hero tile with concentric circles, a pill
-// tile and round badges, with mono numerals. The design source is design/dashboard.html (every value here is
-// the same px as there), so change it there first and port it here.
+// tile and round badges, with mono numerals. This file is the design: change it here, not in a mock-up.
 //
 // It is drawn at the pane's own size (480 wide) so the type stays at its real size; the Svg element scales
 // it to the slot. The pane's boxes have no background or border, so the tiles live in the SVG; the real
@@ -52,11 +51,12 @@ const cap = (x: number, y: number, text: string, fill = MUTED): string =>
   `<text x="${x}" y="${y}" font-family="${SANS}" font-size="11" letter-spacing=".6" fill="${fill}">${esc(text.toUpperCase())}</text>`
 
 /**
- * The actions tile: a dotted field with the mark in a black disc and three square buttons below it, drawn here
+ * The actions tile: a dotted field with the mark in a black disc and four square buttons below it, drawn here
  * without their labels (an SVG cannot be pressed): the pane lays real Buttons over the labels' row, 150px down
- * (8 rows of 18px), centred on the three columns.
+ * (8 rows of 18px), centred on the four columns.
  */
-const ACTION_ICONS: Record<'start' | 'stop' | 'save' | 'setup', string> = {
+const ACTION_ICONS: Record<'start' | 'stop' | 'save' | 'setup' | 'compact', string> = {
+  compact: '<path d="M12 3v6M9 6l3 3 3-3M12 21v-6M9 18l3-3 3 3M4 12h16"/>',
   start: '<rect x="3.5" y="3.5" width="17" height="17" rx="5"/><path d="M10 8.6l5.2 3.4-5.2 3.4z"/>',
   stop: '<rect x="3.5" y="3.5" width="17" height="17" rx="5"/><rect x="9" y="9" width="6" height="6" rx="1"/>',
   save: '<path d="M5 5.5A1.5 1.5 0 016.5 4h9.2L19 7.3v10.2a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 015 17.5z"/><path d="M8.5 4v4.5h6V4M8.5 19v-5h7v5"/>',
@@ -70,19 +70,46 @@ function actions(w: number, h: number, running: boolean): string {
       dots.push(`<circle cx="${x.toFixed(1)}" cy="${24 + row * 16}" r="1" fill="#7a7a7a"/>`)
     }
   }
-  const squares = [running ? 'stop' : 'start', 'save', 'setup'] as const
-  const sq = squares
-    .map((k, i) => {
-      const cx = (w / 6) * (1 + 2 * i)
-      return `<rect x="${(cx - 25).toFixed(1)}" y="88" width="50" height="50" rx="14" fill="#3a3a3a"/>
-${iconG(ACTION_ICONS[k], cx - 11.5, 88 + 13.5, 23, '#ececec')}`
-    })
-    .join('\n')
   return `${tile(0, 0, w, h, 28)}
 ${dots.join('')}
 <circle cx="${w / 2}" cy="44" r="20" fill="#000"/>
 <g transform="translate(${w / 2 - 12} 32)"><path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6L5.6 18.4" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></g>
-${sq}`
+${actionSquares(w, 88, 50, running)}`
+}
+
+/** The four square buttons, centred on four equal columns, `size` px wide, their tops at `y`. */
+function actionSquares(w: number, y: number, size: number, running: boolean): string {
+  return ([running ? 'stop' : 'start', 'save', 'setup', 'compact'] as const)
+    .map((k, i) => {
+      const cx = (w / 8) * (1 + 2 * i)
+      const icon = size * 0.46
+      return `<rect x="${(cx - size / 2).toFixed(1)}" y="${y}" width="${size}" height="${size}" rx="${Math.round(size * 0.28)}" fill="#3a3a3a"/>
+${iconG(ACTION_ICONS[k], cx - icon / 2, y + (size - icon) / 2, icon, '#ececec')}`
+    })
+    .join('\n')
+}
+
+/**
+ * The actions tile as a slim band for above the prompt: the same dotted tile and squares without the mark,
+ * 84px tall. Its labels sit 3 rows down (54px), where the band lays the real Buttons.
+ */
+export function actionsBar(running: boolean): string {
+  const W = 480
+  const H = 84
+  const dots: string[] = []
+  for (let row = 0; row < 3; row++) {
+    for (let x = 18 + 0.8; x < W - 18; x += 15.6) {
+      const cy = 14 + row * 16
+      // Not behind a square (their columns are 120px wide, the squares 44px); the labels' row stays clear.
+      if ([1, 3, 5, 7].some(k => Math.abs(x - (W / 8) * k) < 30)) continue
+      dots.push(`<circle cx="${x.toFixed(1)}" cy="${cy}" r="1" fill="#7a7a7a"/>`)
+    }
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">
+${tile(0, 0, W, H, 28)}
+${dots.join('')}
+${actionSquares(W, 8, 44, running)}
+</svg>`
 }
 
 /** The ring gauges' icons, on a 24 grid. */
