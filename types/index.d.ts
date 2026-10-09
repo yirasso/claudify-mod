@@ -10,9 +10,13 @@ export type ScriptRun = {
 /**
  * The session's project: the scripts the pane can run (`dev`, `start`) and the package manager; when the
  * graphify graph was built (the graphify-out folder's date, or null without it); the GitHub repository of the
- * `origin` remote (`owner/repo`, or null) and the current branch; the enabled Ponytail plugin's id, or null.
+ * `origin` remote (`owner/repo`, or null) and the current branch; the enabled Ponytail plugin's id, or null;
+ * whether there is something to send to GitHub (changed files, unpushed commits, or a repo not on GitHub yet).
  */
-export type ProjectScripts = { pm: string; names: string[]; graphify: number | null; github: string | null; branch: string | null; ponytail: string | null; git: boolean }
+export type ProjectScripts = { pm: string; names: string[]; graphify: number | null; github: string | null; branch: string | null; ponytail: string | null; git: boolean; pending: boolean }
+
+/** A rate-limit window: `five_hour` or `seven_day`, how much of it is used (0 to 100) and when it resets. */
+export type UsageLimit = { kind: string; percentUsed: number; resetsAt?: string }
 
 /** What the GitHub button does: a new repo (no git yet), publish an existing repo, or commit and push. */
 export type GithubPlan = 'create' | 'publish' | 'push'
@@ -38,6 +42,8 @@ declare module 'claude-code' {
       runs: Record<string, ScriptRun>
       /** The GitHub button's flow. */
       github: GithubFlow
+      /** The account's rate-limit windows, as the last response reported them. */
+      limits: UsageLimit[]
     }
   }
 }

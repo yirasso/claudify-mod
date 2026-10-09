@@ -1,14 +1,16 @@
-// The Claudify band above the prompt: the project's actions (Start/Stop Project, Save Changes, Setup Project)
-// and whether GitHub, graphify and Ponytail are on, with the script output and the GitHub confirm flow under them.
+// The Claudify band above the prompt: the project's actions (Start/Stop Project, Save Changes, Setup Project),
+// and on the right whether GitHub, graphify and Ponytail are on and the 5-hour and weekly limits, with the script
+// output and the GitHub confirm flow under them.
 
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { GithubFlow, GithubPlan, ProjectScripts, ScriptRun } from '../types'
+import type { GithubFlow, GithubPlan, ProjectScripts, ScriptRun, UsageLimit } from '../types'
 
-const project = atom({ plugin: 'claudify', key: 'project' } as const, { pm: 'npm', names: [], graphify: null, github: null, branch: null, ponytail: null, git: true })
+const project = atom({ plugin: 'claudify', key: 'project' } as const, { pm: 'npm', names: [], graphify: null, github: null, branch: null, ponytail: null, git: true, pending: false })
 const runs = atom({ plugin: 'claudify', key: 'runs' } as const, {})
 const github = atom({ plugin: 'claudify', key: 'github' } as const, { phase: 'idle', plan: 'push', log: [] })
+const limits = atom({ plugin: 'claudify', key: 'limits' } as const, [])
 
 // ——— The project: the "dev" and "start" buttons and the checks ———
 
@@ -23,9 +25,10 @@ const ANSI = new RegExp(String.fromCharCode(27) + '\\[[0-9;?]*[A-Za-z]', 'g')
  * The session folder's project: the package.json scripts that get a button and the package manager (by its
  * lockfile), the graphify graph, and the GitHub repository of the `origin` remote.
  */
-/** The message the Setup Project button sends: it asks for what the project's checks still miss (GitHub is the Save Changes button's). */
+/** The message the Setup Project button sends: it asks for what the project's checks still miss. */
 function setupPrompt(p: ProjectScripts): string {
   const todo = [
+    ...(p.github ? [] : ['publish it to a new private GitHub repository (git init if needed, then gh repo create --private --source . --push)']),
     ...(p.graphify ? [] : ['build the graphify knowledge graph of this project (/graphify)']),
     ...(p.ponytail ? [] : ['install the Ponytail plugin (/plugin install ponytail@ponytail)']),
   ]
@@ -57,10 +60,27 @@ async function readProject($: EngineInterface): Promise<void> {
   const remote = await git('remote', 'get-url', 'origin')
   const repo = /github\.com[:/]([^/\s]+\/[^/\s]+?)(?:\.git)?\/?$/.exec(remote)?.[1] ?? null
   const branch = repo ? (await git('rev-parse', '--abbrev-ref', 'HEAD')) || null : null
+  // Something to send to GitHub: a folder with no repo yet, a repo not on GitHub yet, changed files, or
+  // commits the remote does not have (all of them, when the branch has no upstream).
+  let pending: boolean
+  if (!isRepo) pending = (await $.fs.list(cwd).catch(() => [])).some(x => !x.name.startsWith('.'))
+  else if (!repo) pending = true
+  else {
+    const upstream = await git('rev-parse', '--abbrev-ref', '@{u}')
+    const ahead = upstream ? Number(await git('rev-list', '--count', '@{u}..HEAD')) || 0 : (await git('rev-parse', 'HEAD')) ? 1 : 0
+    pending = (await git('status', '--porcelain')) !== '' || ahead > 0
+  }
   // Ponytail: the plugin enabled in the merged settings (user, project or local).
   const settings = (await $.settings.read().catch(() => ({}))) as { enabledPlugins?: Record<string, unknown> }
   const ponytail = Object.entries(settings.enabledPlugins ?? {}).find(([id, on]) => id.startsWith('ponytail@') && on === true)?.[0] ?? null
-  await update($, project, () => ({ pm, names, graphify: graph ? graph.mtimeMs : null, github: repo, branch, ponytail, git: isRepo }))
+  // An empty graph.json is a build that failed: it does not count.
+  const graphify = graph && graph.size > 0 ? graph.mtimeMs : null
+  await update($, project, () => ({ pm, names, graphify, github: repo, branch, ponytail, git: isRepo, pending }))
+}
+
+/** Keeps the rate-limit windows the band draws. */
+async function setLimits($: EngineInterface, rateLimits: readonly UsageLimit[]): Promise<void> {
+  await update($, limits, () => rateLimits.map(l => ({ kind: l.kind, percentUsed: l.percentUsed, ...(l.resetsAt ? { resetsAt: l.resetsAt } : {}) })))
 }
 
 /** Ends a script's whole process tree (on Windows, killing only the parent leaves Vite and Electron alive). */
@@ -229,12 +249,20 @@ async function runGithub($: EngineInterface): Promise<void> {
 
 type Ui = ReturnType<EngineInterface['ui']['resolve']>
 
+/** The rate-limit windows that get a bar, in order, and the bar's width in cells. */
+const LIMITS = [
+  ['five_hour', '5h'],
+  ['seven_day', 'Week'],
+] as const
+const BAR = 8
+
 /**
- * The band above the prompt: the three actions (Start/Stop Project, Save Changes, Setup Project) as real
- * buttons with a symbol in front of the label (one that cannot act right now shows as dim text), a dot for
- * each check (GitHub, graphify, Ponytail), then what the scripts and the GitHub flow report.
+ * The band above the prompt: on the left the actions as real buttons with a symbol in front of the label
+ * (Start/Stop Project; Save Changes while something waits to go to GitHub; Setup Project while a check is
+ * off); on the right a dot for each check (GitHub, graphify, Ponytail) and the 5-hour and weekly limit
+ * bars; then what the scripts and the GitHub flow report.
  */
-function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns: Record<string, ScriptRun>, gh: GithubFlow) {
+function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns: Record<string, ScriptRun>, gh: GithubFlow, usage: UsageLimit[]) {
   const { Box, Button, Text } = ui
   // Start Project runs the dev script, or the start script when there is no dev.
   const mainScript = proj.names.includes('dev') ? 'dev' : proj.names.includes('start') ? 'start' : (proj.names[0] ?? null)
@@ -249,35 +277,49 @@ function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns:
   ) : (
     <Text dimColor>▶ Start Project</Text>
   )
-  const saveButton =
-    gh.phase === 'idle' || gh.phase === 'done' || gh.phase === 'error' ? (
-      <Button key="github:start" variant="secondary" label="↑ Save Changes" onPress={() => void prepareGithub($)} />
-    ) : (
-      <Text dimColor>↑ Save Changes</Text>
-    )
-  const setupButton =
-    !proj.graphify || !proj.ponytail ? (
-      <Button key="project:setup" variant="secondary" label="⚙ Setup Project" onPress={() => void $.prompt.submit({ text: setupPrompt(proj) })} />
-    ) : (
-      <Text dimColor>⚙ Setup Project</Text>
-    )
+  // Save Changes is there only while something is waiting to go to GitHub, and not while its flow runs.
+  const saveButton = proj.pending && (gh.phase === 'idle' || gh.phase === 'done' || gh.phase === 'error') && (
+    <Button key="github:start" variant="secondary" label="↑ Save Changes" onPress={() => void prepareGithub($)} />
+  )
+  // Setup Project leaves once GitHub, graphify and Ponytail are all on.
+  const setupButton = (!proj.github || !proj.graphify || !proj.ponytail) && (
+    <Button key="project:setup" variant="secondary" label="⚙ Setup Project" onPress={() => void $.prompt.submit({ text: setupPrompt(proj) })} />
+  )
   // The checks: a filled green dot when it is on, a hollow dim one when it is not.
   const checks = [
-    { key: 'check:github', label: 'GitHub', on: !!proj.github },
-    { key: 'check:graphify', label: 'graphify', on: proj.graphify !== null },
-    { key: 'check:ponytail', label: 'Ponytail', on: !!proj.ponytail },
+    { label: 'GitHub', on: !!proj.github },
+    { label: 'graphify', on: proj.graphify !== null },
+    { label: 'Ponytail', on: !!proj.ponytail },
   ]
+  // The 5-hour and weekly limits as bars; a window past its reset reads empty until the next response.
+  const now = Date.now()
+  const bars = LIMITS.flatMap(([kind, label]) => {
+    const l = usage.find(x => x.kind === kind)
+    if (!l) return []
+    const used = l.resetsAt && Date.parse(l.resetsAt) <= now ? 0 : Math.max(0, Math.min(100, l.percentUsed))
+    const full = Math.round((used / 100) * BAR)
+    return [{ label, used, bar: '█'.repeat(full) + '░'.repeat(BAR - full) }]
+  })
   return (
     <Box flexDirection="column">
-      <Box flexDirection="row" gap={1} flexWrap="wrap">
-        {startButton}
-        {saveButton}
-        {setupButton}
-        {checks.map(c => (
-          <Text key={c.key} color={c.on ? 'success' : undefined} dimColor={!c.on}>
-            {`${c.on ? '●' : '○'} ${c.label}`}
-          </Text>
-        ))}
+      <Box flexDirection="row" justifyContent="space-between" gap={1} flexWrap="wrap">
+        <Box flexDirection="row" gap={1}>
+          {startButton}
+          {saveButton}
+          {setupButton}
+        </Box>
+        <Box flexDirection="row" gap={2}>
+          {checks.map(c => (
+            <Text color={c.on ? 'success' : undefined} dimColor={!c.on}>
+              {`${c.on ? '●' : '○'} ${c.label}`}
+            </Text>
+          ))}
+          {bars.map(b => (
+            <Text color={b.used >= 90 ? 'error' : b.used >= 70 ? 'warning' : undefined}>
+              {`${b.label} ${b.bar} ${Math.round(b.used)}%`}
+            </Text>
+          ))}
+        </Box>
       </Box>
     {proj.names.map(name => {
       const run = scriptRuns[name]
@@ -338,6 +380,8 @@ export const register: Register = on => {
       await update($, runs, all => ({ ...all, [name]: stopped }))
     }
     await readProject($)
+    const usage = await $.session.usage().catch(() => null)
+    if (usage) await setLimits($, usage.rateLimits)
     // The project's checks stay current: a new graph, a plugin enabled or a new remote shows within 10 s.
     $.clock.every(10_000, () => void readProject($).catch(() => undefined))
     return started
@@ -350,7 +394,14 @@ export const register: Register = on => {
     const proj = await read($, project)
     const scriptRuns = await read($, runs)
     const gh = await read($, github)
-    return <Box flexDirection="column">{actionBar($, $.ui.resolve(e), proj, scriptRuns, gh)}</Box>
+    const usage = await read($, limits)
+    return <Box flexDirection="column">{actionBar($, $.ui.resolve(e), proj, scriptRuns, gh, usage)}</Box>
+  })
+
+  // The limit bars follow the windows as the engine measures them.
+  on('session.measure', async ($, e, next) => {
+    if (e.changed.includes('rateLimits')) await setLimits($, e.rateLimits)
+    return next(e)
   })
 
   // When the session ends, whatever the buttons left running is ended too.
