@@ -54,6 +54,7 @@ The owner is Tomás. He talks in European Portuguese (never Brazilian); the plug
 - **The graphify check** uses `$.session.cwd()` plus `graphify-out/graph.json`. `fs.list('.')` failed.
 - **A plugin can't spawn an Agent under auto mode**: the classifier refuses it ("the request that produced this action did not ask for one"). Call the model with `$.model.complete` instead.
 - **`$.state` outlives `/reload-plugins`**: a line left from a failed run stays; `session.start` clears `graphJob`.
+- **GUI apps** (Explorer): spawn them with `$.process.spawn` and do not wait; `process.run` waits, times out and kills the window.
 - **`$.fs.write`/`read` with a relative path** resolve against the process, not the session folder: build paths from `$.session.cwd()`.
 - **`graphify update .`** (code only) re-reads `README.md` as code and drops its semantic nodes; the next docs pass brings them back.
 - **`graphify hook install`** adds post-commit/post-checkout hooks (code only, background rebuild) and a merge driver line in `.gitattributes`; `keepGraphAttributesLocal` moves that line to `.git/info/attributes`.

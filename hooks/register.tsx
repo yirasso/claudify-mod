@@ -517,9 +517,16 @@ async function toggleNotify($: EngineInterface): Promise<void> {
 /** Opens the session folder in the file manager. */
 async function openFolder($: EngineInterface): Promise<void> {
   const cwd = await $.session.cwd()
-  // explorer.exe launched from the engine does not come up; PowerShell's Invoke-Item opens it reliably.
-  if ((await $.env.get('OS')) === 'Windows_NT') await sh($, ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', `Invoke-Item -LiteralPath '${cwd.replace(/\//g, '\\').replace(/'/g, "''")}'`])
-  else if ((await sh($, ['open', cwd])).exitCode !== 0) await sh($, ['xdg-open', cwd])
+  if ((await $.env.get('OS')) === 'Windows_NT') {
+    // Explorer opened this way lives as long as its window: waiting for it (process.run) timed out and the
+    // timeout killed the window. Spawned, and left to run on its own.
+    const child = $.process.spawn({ argv: ['explorer.exe', cwd.replace(/\//g, '\\')] })
+    void (async () => {
+      while (!(await child.next()).done) {
+        // Its output is not needed.
+      }
+    })().catch(() => undefined)
+  } else if ((await sh($, ['open', cwd])).exitCode !== 0) await sh($, ['xdg-open', cwd])
 }
 
 /**
