@@ -20,7 +20,7 @@ Start a new session afterwards. You can enable, disable or remove the plugin fro
 
 ## Use
 
-- `/usage-board` opens the pane.
+- `/claudify` opens the pane, or closes it when it is already open.
 - In the desktop app, the **Show / Hide Claude panel** button above the prompt shows and hides it.
 - In a terminal at least 144 columns wide, the pane opens by itself.
 

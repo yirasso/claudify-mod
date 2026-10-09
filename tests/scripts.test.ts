@@ -21,7 +21,7 @@ for (const surface of SURFACES) {
     on('command.register', async () => ({ value: undefined }) as never)
     on('tool.list', async () => ({ value: [] }))
 
-    await $.command.run({ command: 'usage-board', args: '', origin: { kind: 'user' } } as never)
+    await $.command.run({ command: 'claudify', args: '', origin: { kind: 'user' } } as never)
     const ui = await $.ui.mount({
       plugin: 'usage-board',
       surface,
@@ -66,7 +66,7 @@ test('stopping a script with the button shows «stopped», not a failed exit', a
   const nap = async (_ms: number): Promise<void> => {
     for (let i = 0; i < 50; i++) await Promise.resolve()
   }
-  await $.command.run({ command: 'usage-board', args: '', origin: { kind: 'user' } } as never)
+  await $.command.run({ command: 'claudify', args: '', origin: { kind: 'user' } } as never)
   const ui = await $.ui.mount({ plugin: 'usage-board', surface: 'terminal', component: 'Pane', requestId: 'usage-board', props: { title: 'Claude', isFocused: false } as never, viewport: { columns: 70, rows: 50 } as never })
   void ui.press({ key: 'script:start' })
   for (let i = 0; i < 50 && !(await ui.find({ key: 'script:start' }))?.text.includes('Stop'); i++) await nap(10)

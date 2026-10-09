@@ -41,7 +41,7 @@ test('connectors, servers, plugins and built-ins each go in their own place', as
   on('fs.read', async () => ({ deny: 'no package.json' }) as never)
   on('fs.exists', async () => ({ value: false }))
 
-  await $.command.run({ command: 'usage-board', args: '', origin: { kind: 'user' } } as never)
+  await $.command.run({ command: 'claudify', args: '', origin: { kind: 'user' } } as never)
   const ui = await $.ui.mount({
     plugin: 'usage-board',
     surface: 'terminal',
@@ -92,7 +92,7 @@ test('a removed connector or a deleted skill leaves the pane on the next read', 
   // The connector is used once, so it has a «last used» time.
   on('tool.call', async () => ({ result: { content: [] } }) as never)
 
-  await $.command.run({ command: 'usage-board', args: '', origin: { kind: 'user' } } as never)
+  await $.command.run({ command: 'claudify', args: '', origin: { kind: 'user' } } as never)
   await $.tool.call({ tool: `mcp__${GMAIL}__search_threads` } as never)
   const ui = await $.ui.mount({ plugin: 'usage-board', surface: 'terminal', component: 'Pane', requestId: 'usage-board', props: { title: 'Claude', isFocused: false } as never, viewport: { columns: 80, rows: 60 } as never })
   const shown = async (): Promise<string[]> => (await ui.findAll({ type: 'Text' })).map(t => t.text)
@@ -101,7 +101,9 @@ test('a removed connector or a deleted skill leaves the pane on the next read', 
 
   tools = []
   skills = []
-  await $.command.run({ command: 'usage-board', args: '', origin: { kind: 'user' } } as never)
+  // /claudify toggles: the first run closes the pane, the second opens it again and reads the session afresh.
+  await $.command.run({ command: 'claudify', args: '', origin: { kind: 'user' } } as never)
+  await $.command.run({ command: 'claudify', args: '', origin: { kind: 'user' } } as never)
   expect(await shown()).not.toContain('Gmail')
   expect(await shown()).not.toContain('grilling')
 })

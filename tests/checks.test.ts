@@ -20,7 +20,7 @@ for (const [graph, remote] of [
     on('ui.open', async () => ({ value: {} }) as never)
     on('command.register', async () => ({ value: undefined }) as never)
 
-    await $.command.run({ command: 'usage-board', args: '', origin: { kind: 'user' } } as never)
+    await $.command.run({ command: 'claudify', args: '', origin: { kind: 'user' } } as never)
     const ui = await $.ui.mount({
       plugin: 'usage-board',
       surface: 'terminal',

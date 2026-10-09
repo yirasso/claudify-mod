@@ -15,7 +15,7 @@ for (const surface of SURFACES) {
   test(`an MCP server is «in use» while its tool runs (${surface})`, async ($, on) => {
     let during = ''
     // The test stands in for the engine: while the tool «runs», it reads the pane.
-    on('tool.call', { tool: 'mcp__Roblox_Studio__run_code' }, async () => {
+    on('tool.call', { tool: 'mcp__Roblox_Studio__run_code' } as never, async () => {
       during = await shown()
       return { result: { content: [] } } as never
     })
@@ -58,4 +58,25 @@ test('the band above the prompt shows and hides the pane', async ($, on) => {
   await band.press({ key: 'band:toggle' })
   expect(calls).toEqual(['open', 'close'])
   expect((await band.find({ key: 'band:toggle' }))?.text).toContain('Show Claude panel')
+})
+
+test('/claudify opens the pane, and closes it when it is already open', async ($, on) => {
+  const calls: string[] = []
+  on('ui.open', async () => (calls.push('open'), { value: { isPlaced: true } }) as never)
+  on('ui.close', async () => (calls.push('close'), { value: undefined }) as never)
+  on('command.register', async () => ({ value: undefined }) as never)
+  on('tool.list', async () => ({ value: [] }) as never)
+  on('session.usage', async () => ({ value: { startedAt: 0, context: {}, rateLimits: [] } }) as never)
+  on('fs.read', async () => ({ deny: 'no package.json' }) as never)
+  on('fs.exists', async () => ({ value: false }))
+  on('session.cwd', async () => ({ value: 'C:/Dev/Nau' }))
+  on('fs.list', async () => ({ value: [] }) as never)
+  on('process.run', async () => ({ value: { exitCode: 1, stdout: '', stderr: '' } }) as never)
+  // The host lists the pane while it is open.
+  on('ui.panes', async () => ({ value: calls.at(-1) === 'open' ? [{ id: 'usage-board', title: 'Claude', isShown: true, isFocused: false, isPlaced: true }] : [] }) as never)
+  const run = () => $.command.run({ command: 'claudify', args: '', origin: { kind: 'user' } } as never) as Promise<{ text?: string }>
+  expect((await run()).text).toContain('Opened')
+  expect((await run()).text).toContain('Closed')
+  expect((await run()).text).toContain('Opened')
+  expect(calls).toEqual(['open', 'close', 'open'])
 })

@@ -376,10 +376,25 @@ async function openPane($: EngineInterface): Promise<void> {
   await update($, paneOpen, () => r.isPlaced !== false)
 }
 
+/** Closes the pane (the band's button shows "Open" again). */
+async function closePane($: EngineInterface): Promise<void> {
+  await $.ui.close({ id: PANE }).catch(() => undefined)
+  await update($, paneOpen, () => false)
+}
+
+/** Whether the pane is drawn now; the atom answers when the host cannot list the panes. */
+async function isPaneOpen($: EngineInterface): Promise<boolean> {
+  try {
+    return (await $.ui.panes()).some(pane => pane.id === PANE && pane.isPlaced)
+  } catch {
+    return read($, paneOpen)
+  }
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
-    await $.command.register({ name: 'usage-board', description: 'Open the pane with the usage limits, skills, MCP servers, connectors and plugins' })
+    await $.command.register({ name: 'claudify', description: 'Open or close the Claude pane: usage limits, project, skills, MCP servers, connectors and plugins' })
     // A mod reload kills the wrapper but not the tree: whatever was left running is ended here.
     for (const [name, run] of Object.entries(await read($, runs))) {
       if (run.status === 'exited') continue
@@ -396,7 +411,12 @@ export const register: Register = on => {
     return started
   })
 
-  on('command.run', { command: 'usage-board' }, async $ => {
+  // /claudify toggles the pane: it closes it when it is open and opens it otherwise.
+  on('command.run', { command: 'claudify' }, async $ => {
+    if (await isPaneOpen($)) {
+      await closePane($)
+      return { text: 'Closed the "Claude" pane.' }
+    }
     await openPane($)
     await readProject($)
     await refresh($)
@@ -423,7 +443,7 @@ export const register: Register = on => {
           plain
           dimColor
           label={isOpen ? '◧ Hide Claude panel' : '◧ Show Claude panel'}
-          onPress={() => void (isOpen ? $.ui.close({ id: PANE }).catch(() => undefined).then(() => update($, paneOpen, () => false)) : openPane($))}
+          onPress={() => void (isOpen ? closePane($) : openPane($))}
         />
       </Box>
     )
