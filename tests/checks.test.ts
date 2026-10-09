@@ -18,6 +18,8 @@ for (const [graph, remote] of [
     })
     on('session.usage', async () => ({ value: { startedAt: 0, context: {}, rateLimits: [] } }) as never)
     on('tool.list', async () => ({ value: [] }))
+    let sent = ''
+    on('prompt.submit', async (_$: unknown, e: { text: string }) => ((sent = e.text), { drop: 'test' }) as never)
 
     on('session.start', async () => ({ cwd: 'C:/Dev/Nau' }) as never)
 
@@ -25,5 +27,11 @@ for (const [graph, remote] of [
     const ui = await $.ui.mount({ plugin: 'claudify', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false } as never })
     // With GitHub, a graph and Ponytail there is nothing left to set up: the button leaves.
     expect(!!(await ui.find({ key: 'project:setup' }))).toBe(!graph)
+    if (graph) return
+
+    // Its message asks for the graph, and for graphify-out/ in .gitignore with it.
+    await ui.press({ key: 'project:setup' })
+    expect(sent).toContain('/graphify')
+    expect(sent).toContain('graphify-out/ to .gitignore')
   })
 }

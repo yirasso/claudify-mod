@@ -29,7 +29,7 @@ const ANSI = new RegExp(String.fromCharCode(27) + '\\[[0-9;?]*[A-Za-z]', 'g')
 function setupPrompt(p: ProjectScripts): string {
   const todo = [
     ...(p.github ? [] : ['publish it to a new private GitHub repository (git init if needed, then gh repo create --private --source . --push)']),
-    ...(p.graphify ? [] : ['build the graphify knowledge graph of this project (/graphify)']),
+    ...(p.graphify ? [] : ['build the graphify knowledge graph of this project (/graphify) and add graphify-out/ to .gitignore (create the file if it is missing)']),
     ...(p.ponytail ? [] : ['install the Ponytail plugin (/plugin install ponytail@ponytail)']),
   ]
   return `Set up this project: ${todo.join(', and ')}.`
