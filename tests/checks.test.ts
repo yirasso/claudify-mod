@@ -4,9 +4,10 @@ for (const [graph, remote] of [
   [true, 'https://github.com/yirasso/nau.git'],
   [false, ''],
 ] as const) {
-  test(`the project says whether it has graphify and GitHub (${graph ? 'with' : 'without'})`, async ($, on) => {
+  test(`Setup Project is a button only while graphify or Ponytail is missing (${graph ? 'with' : 'without'})`, async ($, on) => {
     on('fs.read', async () => ({ value: JSON.stringify({ scripts: { start: 'electron-vite dev' } }) }))
     on('fs.exists', async () => ({ value: false }))
+    on('settings.read', async () => ({ value: graph ? { enabledPlugins: { 'ponytail@ponytail': true } } : {} }) as never)
     on('session.cwd', async () => ({ value: 'C:/Dev/Nau' }))
     on('fs.list', async () => ({ value: graph ? [{ name: 'graph.json', kind: 'file', size: 0, mtimeMs: Date.now() - 2 * 86_400_000, isLink: false }] : [] }) as never)
     on('process.run', async (_$: unknown, e: { argv: readonly string[] }) => {
@@ -21,21 +22,8 @@ for (const [graph, remote] of [
     on('command.register', async () => ({ value: undefined }) as never)
 
     await $.command.run({ command: 'claudify', args: '', origin: { kind: 'user' } } as never)
-    const ui = await $.ui.mount({
-      plugin: 'claudify',
-      surface: 'terminal',
-      component: 'Pane',
-      requestId: 'claudify',
-      props: { title: 'Claude', isFocused: false } as never,
-      viewport: { columns: 80, rows: 60 } as never,
-    })
-    const text = (await ui.findAll({ type: 'Text' })).map(t => t.text).join('\n')
-    if (graph) {
-      expect(text).toContain('built 2 days ago')
-      expect(text).toContain('yirasso/nau · main')
-    } else {
-      expect(text).toContain('no graph (run /graphify)')
-      expect(text).toContain('no repository connected')
-    }
+    const ui = await $.ui.mount({ plugin: 'claudify', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false } as never })
+    // With a graph and Ponytail there is nothing left to set up: the button turns into dim text.
+    expect(!!(await ui.find({ key: 'project:setup' }))).toBe(!graph)
   })
 }

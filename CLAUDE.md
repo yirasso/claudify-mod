@@ -1,11 +1,9 @@
 # Claudify plugin
 
-A Claude Code plugin (a "mod": function hooks, no MCP server) that shows a pane with:
+A Claude Code plugin (a "mod": function hooks, no MCP server) with two parts:
 
-- the Claude plan's usage limits;
-- the project's score and checks (GitHub repo, graphify, Ponytail);
-- npm dev/start buttons and a GitHub button;
-- collapsible lists of the session's skills, MCP servers, connectors and plugins, each lit up while in use.
+- the **pane** (`/claudify`): collapsible lists of the session's skills, MCP servers, connectors and plugins, each lit up while in use. Nothing else is in the pane;
+- the **band above the prompt**: the «Show/Hide Claude panel» button and four action buttons (Start/Stop Project, Save Changes, Setup Project, Compact), with the script output and the GitHub confirm flow under them.
 
 The owner is Tomás. He talks in European Portuguese (never Brazilian); the plugin's UI and code are in English. Repo: https://github.com/yirasso/claudify (branch `main`).
 
@@ -15,7 +13,7 @@ The owner is Tomás. He talks in European Portuguese (never Brazilian); the plug
   - **To ship a change:** bump `version` in `.claude-plugin/plugin.json`, commit, push to `main`, then `claude plugin update claudify@tomas-plugins` and `/reload-plugins`.
   - **To try edits before pushing:** `claude --plugin-dir C:\Dev\Claudify`.
 - **The `claude` CLI is not on PATH.** The binary is `%APPDATA%\Claude\claude-code\<version>\<hash>\claude.exe` (it was `2.1.293\83cb0bd7fed4` on 9 Oct 2026).
-- **Every change ships.** After each change (the three checks below passing): bump `version`, commit, push to `main`, `claude plugin update claudify@tomas-plugins` and `/reload-plugins`, so Tomás sees it in Claude straight away. No separate HTML mock-up: the UI is designed directly in `hooks/cards.ts` and `hooks/register.tsx`.
+- **Every change ships.** After each change (the three checks below passing): bump `version`, commit, push to `main`, `claude plugin update claudify@tomas-plugins` and `/reload-plugins`, so Tomás sees it in Claude straight away. No separate HTML mock-up: the UI is designed directly in `hooks/register.tsx`.
 - **Before finishing a change**, all three must pass:
   - `claude plugin validate .`
   - `claude plugin test .` (17 tests, 6 files)
@@ -26,13 +24,10 @@ The owner is Tomás. He talks in European Portuguese (never Brazilian); the plug
 
 - `hooks/hooks.json`: `{ "modules": ["./register.tsx"] }`.
 - `hooks/register.tsx`: every hook.
-  - **Events handled:** `session.start`, `command.run` (`/claudify`, which toggles the pane), `session.measure`, `skill.prompt`, `tool.call`, `turn.complete`, `ui.render`, `ui.close`, `session.end`.
-  - **What it renders:** `Pane` (the board) and `AbovePrompt` (the «Show/Hide Claude panel» band button, desktop).
+  - **Events handled:** `session.start`, `command.run` (`/claudify`, which toggles the pane), `skill.prompt`, `tool.call`, `turn.complete`, `ui.render`, `ui.close`, `session.end`.
+  - **What it renders:** `Pane` (the lists) and `AbovePrompt` (the band: toggle button, `actionBar`).
   - **Its functions:** `refresh` (every 10 s, via `$.clock.every`), `readProject`, `runScript`/`stopScript`/`killTree`, `prepareGithub`/`runGithub` (the commit message comes from `$.model.complete` with Sonnet 5.5 at medium effort, and nothing runs before the user confirms), `openPane` and `guessConnector` (claude.ai connectors arrive as UUIDs, so their names are guessed).
-- `hooks/cards.ts`: `dashboard(d)` returns one 480-wide SVG (usage rings, project hero, repository and context tiles). The actions are not in it: `actionButtons` in `register.tsx` draws four real `Button`s (▶ Start/■ Stop Project, ↑ Save Changes, ⚙ Setup Project, ⇊ Compact) in the pane and in the band above the prompt.
-  - The style is copied from Tomás's reference: https://dribbble.com/shots/26970884-Investment-Dashboard-Widget (light cards, rounded bars, a score arc).
-  - It shows on desktop only, as `<Svg>`. The terminal gets a text version.
-- `types/index.d.ts`: the state contract (`PluginState`). The atoms are `limits`, `skills`, `servers`, `busy`, `used`, `tick`, `project`, `runs`, `open`, `github`, `context` and `paneOpen`.
+- `types/index.d.ts`: the state contract (`PluginState`). The atoms are `skills`, `servers`, `busy`, `used`, `tick`, `project`, `runs`, `open`, `github` and `paneOpen`.
 - `tests/`: `actions`, `board`, `checks`, `connectors`, `github`, `scripts`.
 
 ## Rules learned the hard way
@@ -57,8 +52,8 @@ The owner is Tomás. He talks in European Portuguese (never Brazilian); the plug
 
 **Design (Tomás's feedback)**
 - No glass icons and no fancy decoration: he called a first card UI «bugado e feio».
-- Follow the Dribbble reference closely, and preview the SVG in a browser before shipping it.
+- He dropped the SVG dashboard (usage rings, project score, tiles) on 2026-10-09: the pane is only the four lists. Use real `Button`s, not drawings with labels laid over them.
 
 ## Open
 
-- Not confirmed in Claude Desktop: whether the band button renders, and how the dashboard looks with live data.
+- Not confirmed in Claude Desktop: how the band's buttons and the pane's lists look in Claude Desktop.

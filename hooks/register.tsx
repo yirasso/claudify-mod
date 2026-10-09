@@ -4,16 +4,13 @@
 // while one of its tools runs.
 
 import { atom, read, update } from 'claude-code'
-import type { ElementConstructor, EngineInterface, Register, RenderChildren, SvgProps } from 'claude-code'
+import type { EngineInterface, Register, RenderChildren } from 'claude-code'
 
-import { dashboard } from './cards'
-
-import type { GithubFlow, GithubPlan, Limit, ProjectScripts, ScriptRun, ServerRow, SkillRow } from '../types'
+import type { GithubFlow, GithubPlan, ProjectScripts, ScriptRun, ServerRow, SkillRow } from '../types'
 
 const PANE = 'claudify'
 const TITLE = 'Claude'
 
-const limits = atom({ plugin: 'claudify', key: 'limits' } as const, [])
 const skills = atom({ plugin: 'claudify', key: 'skills' } as const, [])
 const servers = atom({ plugin: 'claudify', key: 'servers' } as const, [])
 const busy = atom({ plugin: 'claudify', key: 'busy' } as const, {})
@@ -23,30 +20,12 @@ const project = atom({ plugin: 'claudify', key: 'project' } as const, { pm: 'npm
 const runs = atom({ plugin: 'claudify', key: 'runs' } as const, {})
 const open = atom({ plugin: 'claudify', key: 'open' } as const, {})
 const github = atom({ plugin: 'claudify', key: 'github' } as const, { phase: 'idle', plan: 'push', log: [] })
-const context = atom({ plugin: 'claudify', key: 'context' } as const, null)
 const paneOpen = atom({ plugin: 'claudify', key: 'paneOpen' } as const, false)
 
 /** An MCP tool's server prefix: `mcp__claude_ai_Gmail__create_draft` → `claude_ai_Gmail`. */
 const wireOf = (tool: string): string | null => {
   const m = /^mcp__(.+?)__/.exec(tool)
   return m?.[1] ?? null
-}
-
-const LIMIT_NAMES: Record<string, string> = { five_hour: 'Session (5 h)', seven_day: 'Week (7 days)', spend_limit: 'Spend' }
-
-/** "resets in 2 h 13 min", from an ISO instant. */
-function until(iso: string | undefined, now: number): string {
-  if (!iso) return ''
-  const ms = Date.parse(iso) - now
-  if (!Number.isFinite(ms)) return ''
-  if (ms <= 0) return 'resetting'
-  const min = Math.round(ms / 60_000)
-  const d = Math.floor(min / 1440)
-  const h = Math.floor((min % 1440) / 60)
-  const m = min % 60
-  if (d) return `resets in ${d} d ${h} h`
-  if (h) return `resets in ${h} h ${m} min`
-  return `resets in ${m} min`
 }
 
 /** "3 min ago", for what was used recently (up to an hour). */
@@ -57,14 +36,6 @@ function ago(at: number | undefined, now: number): string {
   if (min < 60) return `${min} min ago`
   return ''
 }
-
-/** A text bar, filled for the part used. */
-function bar(percent: number, width: number): string {
-  const full = Math.max(0, Math.min(width, Math.round((percent / 100) * width)))
-  return '█'.repeat(full) + '░'.repeat(width - full)
-}
-
-const levelColor = (percent: number): string => (percent >= 90 ? 'error' : percent >= 70 ? 'warning' : 'success')
 
 /** A server named by a UUID: a Claude account connector that the Claude Desktop app hands to the session. */
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -121,12 +92,9 @@ const pluginOfServer = (wire: string): string | null => /^plugin_([^_]+)_/.exec(
 /** The plugins that come with Claude (the Anthropic skills the Claude Desktop app keeps). */
 const isBuiltinPlugin = (name: string): boolean => name.startsWith('anthropic')
 
-/** Reads the session's limits, skills and servers (the local context count, which costs nothing). */
+/** Reads the session's skills and servers. */
 async function refresh($: EngineInterface): Promise<void> {
   const usage = await $.session.usage({ breakdown: 'summary' })
-  await update($, limits, () => usage.rateLimits.map((r): Limit => ({ kind: r.kind, percentUsed: r.percentUsed, resetsAt: r.resetsAt })))
-  const c = usage.context
-  await update($, context, () => (c.percent !== undefined && c.tokens !== undefined ? { percent: c.percent, tokens: c.tokens, window: c.window } : null))
   const b = usage.context.breakdown
   const skillRows: SkillRow[] = (b?.skills?.skillFrontmatter ?? []).map(s => ({ name: s.name, source: s.source, ...(s.pluginName ? { plugin: s.pluginName } : {}) }))
   await update($, skills, () => skillRows.sort((x, y) => x.name.localeCompare(y.name)))
@@ -207,12 +175,6 @@ async function readProject($: EngineInterface): Promise<void> {
   const settings = (await $.settings.read().catch(() => ({}))) as { enabledPlugins?: Record<string, unknown> }
   const ponytail = Object.entries(settings.enabledPlugins ?? {}).find(([id, on]) => id.startsWith('ponytail@') && on === true)?.[0] ?? null
   await update($, project, () => ({ pm, names, graphify: graph ? graph.mtimeMs : null, github: repo, branch, ponytail, git: isRepo }))
-}
-
-/** "built today", "built yesterday", "built 3 days ago": when the graphify graph was made. */
-function since(at: number, now: number): string {
-  const days = Math.floor((now - at) / 86_400_000)
-  return days <= 0 ? 'built today' : days === 1 ? 'built yesterday' : `built ${days} days ago`
 }
 
 /** Ends a script's whole process tree (on Windows, killing only the parent leaves Vite and Electron alive). */
@@ -403,11 +365,11 @@ async function isPaneOpen($: EngineInterface): Promise<boolean> {
 type Ui = ReturnType<EngineInterface['ui']['resolve']>
 
 /**
- * The four actions (Start/Stop Project, Save Changes, Setup Project, Compact), shared by the pane and the
- * band above the prompt: real buttons with a symbol in front of the label. One that cannot act right now
- * shows as dim text.
+ * The band above the prompt: the four actions (Start/Stop Project, Save Changes, Setup Project, Compact) as
+ * real buttons with a symbol in front of the label (one that cannot act right now shows as dim text), then
+ * what the scripts and the GitHub flow report.
  */
-function actionButtons($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns: Record<string, ScriptRun>, gh: GithubFlow) {
+function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns: Record<string, ScriptRun>, gh: GithubFlow) {
   const { Box, Button, Text } = ui
   // Start Project runs the dev script, or the start script when there is no dev.
   const mainScript = proj.names.includes('dev') ? 'dev' : proj.names.includes('start') ? 'start' : (proj.names[0] ?? null)
@@ -437,11 +399,58 @@ function actionButtons($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptR
   // Compact is the same call /compact makes; it is refused while a turn runs, which is not worth a message.
   const compactButton = <Button key="session:compact" variant="secondary" label="⇊ Compact" onPress={() => void $.session.compact().catch(() => undefined)} />
   return (
-    <Box flexDirection="row" gap={1} flexWrap="wrap">
-      {startButton}
-      {saveButton}
-      {setupButton}
-      {compactButton}
+    <Box flexDirection="column">
+      <Box flexDirection="row" gap={1} flexWrap="wrap">
+        {startButton}
+        {saveButton}
+        {setupButton}
+        {compactButton}
+      </Box>
+    {proj.names.map(name => {
+      const run = scriptRuns[name]
+      if (!run) return null
+      const state = run.status === 'running' ? 'running' : run.status === 'stopping' ? 'stopping' : run.code === 0 ? 'finished' : run.code === null ? 'stopped' : `exited with code ${run.code}`
+      return (
+        <Box flexDirection="column">
+          <Box flexDirection="row" gap={1}>
+            <Text color={run.status === 'running' ? 'success' : run.code ? 'error' : undefined} dimColor={run.status !== 'running'}>
+              {`${name} ${state}`}
+            </Text>
+            {run.url && run.status === 'running' && <Text color="suggestion">{run.url}</Text>}
+          </Box>
+          {run.status === 'running' &&
+            run.tail.slice(-2).map(line => (
+              <Text dimColor wrap="truncate-end">
+                {line}
+              </Text>
+            ))}
+        </Box>
+      )
+    })}
+    {gh.phase === 'preparing' && <Text dimColor>Sonnet is writing the commit message…</Text>}
+    {gh.phase === 'confirm' && (
+      <Box flexDirection="column">
+        <Text>
+          {`${gh.plan === 'create' ? 'New repo' : gh.plan === 'publish' ? 'Publish to' : 'Push to'} ${gh.target ?? ''}${gh.files ? ` · ${gh.files} files` : ''}${gh.ahead ? ` · ${gh.ahead} commits to push` : ''}`}
+        </Text>
+        {(gh.message ?? '').split('\n').slice(0, 6).map(line => (
+          <Text dimColor wrap="truncate-end">
+            {`  ${line}`}
+          </Text>
+        ))}
+        <Box flexDirection="row" gap={1}>
+          <Button key="github:confirm" variant="primary" label={gh.files ? 'Commit & push' : 'Push'} onPress={() => void runGithub($)} />
+          <Button key="github:cancel" label="Cancel" onPress={() => void update($, github, (): GithubFlow => ({ phase: 'idle', plan: 'push', log: [] }))} />
+        </Box>
+      </Box>
+    )}
+    {(gh.phase === 'working' || gh.phase === 'done' || gh.phase === 'error') &&
+      gh.log.slice(-4).map(line => (
+        <Text dimColor={gh.phase !== 'error'} color={gh.phase === 'error' ? 'error' : undefined} wrap="truncate-end">
+          {`  ${line}`}
+        </Text>
+      ))}
+    {gh.phase === 'done' && gh.url && <Text color="suggestion">{`  ${gh.url}`}</Text>}
     </Box>
   )
 }
@@ -509,7 +518,7 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column">
         {toggle}
-        {actionButtons($, $.ui.resolve(e), proj, scriptRuns, gh)}
+        {actionBar($, $.ui.resolve(e), proj, scriptRuns, gh)}
       </Box>
     )
   })
@@ -517,16 +526,6 @@ export const register: Register = on => {
   // When the session ends, whatever the buttons left running is ended too.
   on('session.end', async ($, e, next) => {
     for (const run of Object.values(await read($, runs))) if (run.status !== 'exited' && run.pid) await killTree($, run.pid)
-    return next(e)
-  })
-
-  // The limits move during the session: the engine says when a window moves a point.
-  on('session.measure', async ($, e, next) => {
-    if (e.changed.includes('context') && e.context.percent !== undefined && e.context.tokens !== undefined) {
-      const c = e.context
-      await update($, context, () => ({ percent: c.percent ?? 0, tokens: c.tokens ?? 0, window: c.window }))
-    }
-    if (e.changed.includes('rateLimits')) await update($, limits, () => e.rateLimits.map((r): Limit => ({ kind: r.kind, percentUsed: r.percentUsed, resetsAt: r.resetsAt })))
     return next(e)
   })
 
@@ -577,16 +576,9 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text, Button } = $.ui.resolve(e)
-    // The desktop draws SVG (the glass icons, the gauges); the terminal keeps the text version.
-    const Svg = e.surface === 'desktop' ? ((($.ui.resolve(e) as unknown) as { Svg?: ElementConstructor<SvgProps> }).Svg ?? null) : null
     await read($, tick)
-    const proj = await read($, project)
-    const scriptRuns = await read($, runs)
     const isOpen = await read($, open)
-    const gh = await read($, github)
     const now = Date.now()
-    const lims = await read($, limits)
-    const ctx = await read($, context)
     const listedSkills = await read($, skills)
     const listedServers = await read($, servers)
     const live = await read($, busy)
@@ -602,8 +594,6 @@ export const register: Register = on => {
       ...listedServers,
       ...seen.filter(k => k.startsWith('mcp:') && !listedServers.some(s => `mcp:${s.wire}` === k)).map(k => ({ wire: k.slice(4), name: k.slice(4).replace(/_/g, ' '), tools: 0 }))
     ]
-    const cols = e.viewport?.columns ?? 40
-    const barWidth = Math.max(8, Math.min(24, cols - 14))
 
     // ——— Sorting: plugins apart, and in each category what comes built in goes in a drawer ———
     const pluginOfSkill = (s: SkillRow): string | null => s.plugin ?? (s.name.includes(':') ? (s.name.split(':')[0] ?? null) : null)
@@ -705,146 +695,9 @@ export const register: Register = on => {
     }
 
     const activeOf = <T,>(list: T[], key: (x: T) => string): number => list.filter(x => live[key(x)]).length
-    const checksOk = [proj.graphify, proj.github, proj.ponytail].filter(Boolean).length
-    // The repository card's paragraph, with the facts in bold.
-    const insightRuns: { text: string; bold?: boolean }[] = proj.github
-      ? [
-          { text: 'On ' },
-          { text: proj.branch ?? 'the default branch', bold: true },
-          { text: ' of ' },
-          { text: proj.github, bold: true },
-          { text: '. ' },
-          ...(proj.graphify ? [{ text: 'The graph was ' }, { text: since(proj.graphify, now).replace(/^built /, 'built '), bold: true }] : [{ text: 'No graph yet: run ' }, { text: '/graphify', bold: true }]),
-          { text: proj.ponytail ? ' and Ponytail is ' : ' and Ponytail is ' },
-          { text: proj.ponytail ? 'on' : 'off', bold: true },
-          { text: '.' },
-        ]
-      : [{ text: 'No GitHub repository yet. ' }, { text: proj.git === false ? 'Create one' : 'Publish this repo', bold: true }, { text: ' with the button below.' }]
-    const actionRow = actionButtons($, $.ui.resolve(e), proj, scriptRuns, gh)
-    const runningScripts = Object.values(scriptRuns).filter(r => r.status === 'running').length
-
     return (
-      <Box flexDirection="column" gap={1}>
-        {/* One composition after Shamnad's Infinity Widgets: the usage rings, the project score and the repository
-            and context tiles. Drawn at the pane's width (480) so the type keeps its real size. */}
-        {Svg ? (
-          <Svg
-            source={dashboard({
-              rings: [
-                ...(['five_hour', 'seven_day'] as const).map(kind => {
-                  const l = lims.find(x => x.kind === kind)
-                  return { label: kind === 'five_hour' ? 'Session' : 'Week', percent: l ? l.percentUsed : null, icon: kind === 'five_hour' ? ('clock' as const) : ('calendar' as const) }
-                }),
-                ...lims.filter(l => l.kind === 'spend_limit').map(l => ({ label: 'Spend', percent: l.percentUsed, icon: 'spark' as const })),
-              ],
-              reset: (() => {
-                const session = lims.find(x => x.kind === 'five_hour')
-                return session ? until(session.resetsAt, now) : ''
-              })(),
-              context: { percent: ctx ? ctx.percent : null, detail: ctx ? `${Math.round(ctx.tokens / 1000)}k` : 'no reading yet' },
-              score: { value: checksOk, of: 3 },
-              checks: [
-                { name: 'graph', note: proj.graphify ? since(proj.graphify, now) : 'not built' },
-                { name: 'github', note: proj.github ? (proj.branch ?? proj.github) : 'no repo' },
-                { name: 'ponytail', note: proj.ponytail ? 'on' : 'not enabled' },
-              ],
-              insight: insightRuns,
-              badges: [
-                { name: 'graphify', ok: !!proj.graphify, mark: 'graph' },
-                { name: 'GitHub', ok: !!proj.github, mark: 'github' },
-                { name: 'Ponytail', ok: !!proj.ponytail, mark: 'ponytail' },
-                { name: proj.pm, ok: Object.values(scriptRuns).some(r => r.status === 'running'), mark: 'npm' },
-              ],
-            })}
-            alt={`Usage: ${lims.map(l => `${LIMIT_NAMES[l.kind] ?? l.kind} ${Math.round(l.percentUsed)}%`).join(', ') || 'no reading yet'}. Project: ${checksOk} of 3 set up.`}
-          />
-        ) : (
-          <Box flexDirection="column" gap={1}>
-            <Box flexDirection="column">
-              <Text bold>Project</Text>
-              {[
-                { name: 'graphify', ok: !!proj.graphify, note: proj.graphify ? since(proj.graphify, now) : 'no graph (run /graphify)' },
-                { name: 'GitHub', ok: !!proj.github, note: proj.github ? [proj.github, proj.branch].filter(Boolean).join(' · ') : 'no repository connected' },
-                { name: 'Ponytail', ok: !!proj.ponytail, note: proj.ponytail ? `enabled (${proj.ponytail})` : 'not enabled (/plugin install ponytail@ponytail)' },
-              ].map(c => (
-                <Box flexDirection="row" gap={1}>
-                  <Text color={c.ok ? 'success' : 'error'}>{c.ok ? '✓' : '✗'}</Text>
-                  <Text>{c.name}</Text>
-                  <Text dimColor wrap="truncate-end">
-                    {c.note}
-                  </Text>
-                </Box>
-              ))}
-            </Box>
-            <Box flexDirection="column">
-              <Text bold>Usage limits</Text>
-              {lims.length === 0 && <Text dimColor>No reading yet (it shows up after the first reply).</Text>}
-              {lims.map(l => (
-                <Box flexDirection="row" gap={1}>
-                  <Text>{LIMIT_NAMES[l.kind] ?? l.kind}</Text>
-                  <Text color={levelColor(l.percentUsed)}>{bar(l.percentUsed, barWidth)}</Text>
-                  <Text bold color={levelColor(l.percentUsed)}>{`${Math.round(l.percentUsed)}%`}</Text>
-                  <Text dimColor wrap="truncate-end">
-                    {until(l.resetsAt, now)}
-                  </Text>
-                </Box>
-              ))}
-            </Box>
-          </Box>
-        )}
-
-        {/* The actions, one row of buttons, then what the scripts and the GitHub flow report. */}
+      <Box flexDirection="column">
         <Box flexDirection="column">
-          {actionRow}
-          {proj.names.map(name => {
-            const run = scriptRuns[name]
-            if (!run) return null
-            const state = run.status === 'running' ? 'running' : run.status === 'stopping' ? 'stopping' : run.code === 0 ? 'finished' : run.code === null ? 'stopped' : `exited with code ${run.code}`
-            return (
-              <Box flexDirection="column">
-                <Box flexDirection="row" gap={1}>
-                  <Text color={run.status === 'running' ? 'success' : run.code ? 'error' : undefined} dimColor={run.status !== 'running'}>
-                    {`${name} ${state}`}
-                  </Text>
-                  {run.url && run.status === 'running' && <Text color="suggestion">{run.url}</Text>}
-                </Box>
-                {run.status === 'running' &&
-                  run.tail.slice(-2).map(line => (
-                    <Text dimColor wrap="truncate-end">
-                      {line}
-                    </Text>
-                  ))}
-              </Box>
-            )
-          })}
-          {gh.phase === 'preparing' && <Text dimColor>Sonnet is writing the commit message…</Text>}
-          {gh.phase === 'confirm' && (
-            <Box flexDirection="column">
-              <Text>
-                {`${gh.plan === 'create' ? 'New repo' : gh.plan === 'publish' ? 'Publish to' : 'Push to'} ${gh.target ?? ''}${gh.files ? ` · ${gh.files} files` : ''}${gh.ahead ? ` · ${gh.ahead} commits to push` : ''}`}
-              </Text>
-              {(gh.message ?? '').split('\n').slice(0, 6).map(line => (
-                <Text dimColor wrap="truncate-end">
-                  {`  ${line}`}
-                </Text>
-              ))}
-              <Box flexDirection="row" gap={1}>
-                <Button key="github:confirm" variant="primary" label={gh.files ? 'Commit & push' : 'Push'} onPress={() => void runGithub($)} />
-                <Button key="github:cancel" label="Cancel" onPress={() => void update($, github, (): GithubFlow => ({ phase: 'idle', plan: 'push', log: [] }))} />
-              </Box>
-            </Box>
-          )}
-          {(gh.phase === 'working' || gh.phase === 'done' || gh.phase === 'error') &&
-            gh.log.slice(-4).map(line => (
-              <Text dimColor={gh.phase !== 'error'} color={gh.phase === 'error' ? 'error' : undefined} wrap="truncate-end">
-                {`  ${line}`}
-              </Text>
-            ))}
-          {gh.phase === 'done' && gh.url && <Text color="suggestion">{`  ${gh.url}`}</Text>}
-        </Box>
-
-        {/* The session lists sit on the dashboard's grey (desktop; the terminal keeps its own background). */}
-        <Box flexDirection="column" {...(Svg ? { backgroundColor: '#262626', paddingX: 2, paddingY: 1 } : {})}>
           <Box flexDirection="column">
             {head('skills', 'Skills', ownSkills.length + builtinSkills.length, activeOf([...ownSkills, ...builtinSkills], skillKey), true)}
             {opened('skills', true) && (

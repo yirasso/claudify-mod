@@ -1,6 +1,6 @@
 {
   "name": "claudify",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "author": { "name": "Tomas Girao" },
   "description": "A pane with Claude's usage limits, the project's dev/start buttons and checks, and the session's skills, MCP servers, connectors and plugins, lit up while in use",
   "types": "./types/index.d.ts"

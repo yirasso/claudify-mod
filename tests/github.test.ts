@@ -44,14 +44,7 @@ for (const c of CASES) {
     on('command.register', async () => ({ value: undefined }) as never)
 
     await $.command.run({ command: 'claudify', args: '', origin: { kind: 'user' } } as never)
-    const ui = await $.ui.mount({
-      plugin: 'claudify',
-      surface: 'terminal',
-      component: 'Pane',
-      requestId: 'claudify',
-      props: { title: 'Claude', isFocused: false } as never,
-      viewport: { columns: 90, rows: 60 } as never,
-    })
+    const ui = await $.ui.mount({ plugin: 'claudify', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false } as never })
     expect((await ui.find({ key: 'github:start' }))?.text).toContain(c.button)
 
     // First press: Sonnet writes the message, and nothing changes until the person confirms.

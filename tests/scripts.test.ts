@@ -3,7 +3,7 @@ import { expect, test } from 'claude-code/testing'
 const SURFACES = ['terminal', 'desktop'] as const
 
 for (const surface of SURFACES) {
-  test(`the «dev» button runs the script and the pane shows its output (${surface})`, async ($, on) => {
+  test(`the «dev» button runs the script and the band shows its output (${surface})`, async ($, on) => {
     // The test stands in for the engine: a project with a `dev` script, no lockfiles, not on Windows.
     on('fs.read', async () => ({ value: JSON.stringify({ scripts: { dev: 'vite', build: 'vite build' } }) }))
     on('fs.exists', async () => ({ value: false }))
@@ -22,14 +22,7 @@ for (const surface of SURFACES) {
     on('tool.list', async () => ({ value: [] }))
 
     await $.command.run({ command: 'claudify', args: '', origin: { kind: 'user' } } as never)
-    const ui = await $.ui.mount({
-      plugin: 'claudify',
-      surface,
-      component: 'Pane',
-      requestId: 'claudify',
-      props: { title: 'Claude', isFocused: false } as never,
-      viewport: { columns: 70, rows: 50 } as never,
-    })
+    const ui = await $.ui.mount({ plugin: 'claudify', surface, component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false } as never })
     expect((await ui.find({ key: 'script:dev' }))?.text).toContain('Start Project')
     expect(await ui.find({ key: 'script:start' })).toBeUndefined()
 
@@ -67,7 +60,7 @@ test('stopping a script with the button shows «stopped», not a failed exit', a
     for (let i = 0; i < 50; i++) await Promise.resolve()
   }
   await $.command.run({ command: 'claudify', args: '', origin: { kind: 'user' } } as never)
-  const ui = await $.ui.mount({ plugin: 'claudify', surface: 'terminal', component: 'Pane', requestId: 'claudify', props: { title: 'Claude', isFocused: false } as never, viewport: { columns: 70, rows: 50 } as never })
+  const ui = await $.ui.mount({ plugin: 'claudify', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false } as never })
   void ui.press({ key: 'script:start' })
   for (let i = 0; i < 50 && !(await ui.find({ key: 'script:start' }))?.text.includes('Stop Project'); i++) await nap(10)
   await ui.press({ key: 'script:start' })

@@ -1,6 +1,3 @@
-/** A usage-limit window (`five_hour`, `seven_day`, `spend_limit`). */
-export type Limit = { kind: string; percentUsed: number; resetsAt?: string }
-
 /** A skill the session lists; `plugin` is the plugin that brings it. */
 export type SkillRow = { name: string; source: string; plugin?: string }
 
@@ -41,7 +38,6 @@ export type GithubFlow = {
 declare module 'claude-code' {
   interface PluginState {
     'claudify': {
-      limits: Limit[]
       skills: SkillRow[]
       servers: ServerRow[]
       /** What is in use right now: `skill:<name>` or `mcp:<prefix>`, with how many calls are in flight. */
@@ -58,8 +54,6 @@ declare module 'claude-code' {
       open: Record<string, boolean>
       /** The GitHub button's flow. */
       github: GithubFlow
-      /** The context window's fill: the percent, the tokens in it and its size; null before a reading. */
-      context: { percent: number; tokens: number; window: number } | null
       /** Whether the pane is open, for the band's Show / Hide button. */
       paneOpen: boolean
     }
