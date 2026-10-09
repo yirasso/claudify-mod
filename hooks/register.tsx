@@ -667,15 +667,43 @@ export const register: Register = on => {
     // Start Project runs the dev script, or the start script when there is no dev.
     const mainScript = proj.names.includes('dev') ? 'dev' : proj.names.includes('start') ? 'start' : (proj.names[0] ?? null)
     const mainRun = mainScript ? scriptRuns[mainScript] : undefined
+    // The three actions. On the desktop they are plain labels laid over the dashboard's actions tile (the tile
+    // draws the squares; an SVG cannot be pressed), on the terminal a row of buttons.
+    const look = Svg ? { plain: true as const } : {}
+    const startButton = mainScript ? (
+      <Button
+        key={`script:${mainScript}`}
+        variant={mainRun?.status === 'running' ? 'secondary' : 'primary'}
+        {...look}
+        label={mainRun?.status === 'stopping' ? 'Stopping…' : mainRun?.status === 'running' ? 'Stop Project' : 'Start Project'}
+        onPress={() => void (mainRun?.status === 'running' ? stopScript($, mainScript) : mainRun?.status === 'stopping' ? undefined : runScript($, mainScript))}
+      />
+    ) : Svg ? (
+      <Text dimColor>Start Project</Text>
+    ) : null
+    const saveButton =
+      gh.phase === 'idle' || gh.phase === 'done' || gh.phase === 'error' ? (
+        <Button key="github:start" variant="secondary" {...look} label="Save Changes" onPress={() => void prepareGithub($)} />
+      ) : Svg ? (
+        <Text dimColor>Save Changes</Text>
+      ) : null
+    const setupButton =
+      !proj.graphify || !proj.ponytail ? (
+        <Button key="project:setup" variant="secondary" {...look} label="Setup Project" onPress={() => void $.prompt.submit({ text: setupPrompt(proj) })} />
+      ) : Svg ? (
+        <Text dimColor>Setup Project</Text>
+      ) : null
     const runningScripts = Object.values(scriptRuns).filter(r => r.status === 'running').length
 
     return (
       <Box flexDirection="column" gap={1}>
         {Svg ? (
-          // One composition after Outcrowd's dashboard widget: usage across the top, the project score and the
-          // repository insights below. Drawn at the pane's width (480) so the type keeps its real size.
+          <Box position="relative" flexDirection="column">
+          {/* One composition after Shamnad's Infinity Widgets: the actions, the usage rings, the project score and
+              the repository and context tiles. Drawn at the pane's width (480) so the type keeps its real size. */}
           <Svg
             source={dashboard({
+              running: mainRun?.status === 'running',
               rings: [
                 ...(['five_hour', 'seven_day'] as const).map(kind => {
                   const l = lims.find(x => x.kind === kind)
@@ -704,6 +732,15 @@ export const register: Register = on => {
             })}
             alt={`Usage: ${lims.map(l => `${LIMIT_NAMES[l.kind] ?? l.kind} ${Math.round(l.percentUsed)}%`).join(', ') || 'no reading yet'}. Project: ${checksOk} of 3 set up.`}
           />
+          {/* The labels' row of the actions tile (8 rows down, the three columns): real buttons over the drawing. */}
+          <Box position="absolute" top={8} left={0} right={0} flexDirection="row">
+            {[startButton, saveButton, setupButton].map(b => (
+              <Box width="33%" justifyContent="center">
+                {b}
+              </Box>
+            ))}
+          </Box>
+          </Box>
         ) : (
           <Box flexDirection="column" gap={1}>
             <Box flexDirection="column">
@@ -741,27 +778,13 @@ export const register: Register = on => {
 
         {/* The actions, one row: the project's scripts and the GitHub button. */}
         <Box flexDirection="column">
-          <Box flexDirection="row" gap={1} flexWrap="wrap">
-            {mainScript && (
-              <Button
-                key={`script:${mainScript}`}
-                variant={mainRun?.status === 'running' ? 'secondary' : 'primary'}
-                label={mainRun?.status === 'stopping' ? 'Stopping…' : mainRun?.status === 'running' ? 'Stop Project' : 'Start Project'}
-                onPress={() => void (mainRun?.status === 'running' ? stopScript($, mainScript) : mainRun?.status === 'stopping' ? undefined : runScript($, mainScript))}
-              />
-            )}
-            {(gh.phase === 'idle' || gh.phase === 'done' || gh.phase === 'error') && (
-              <Button key="github:start" variant="secondary" label="Save Changes" onPress={() => void prepareGithub($)} />
-            )}
-            {(!proj.graphify || !proj.ponytail) && (
-              <Button
-                key="project:setup"
-                variant="secondary"
-                label="Setup Project"
-                onPress={() => void $.prompt.submit({ text: setupPrompt(proj) })}
-              />
-            )}
-          </Box>
+          {!Svg && (
+            <Box flexDirection="row" gap={1} flexWrap="wrap">
+              {startButton}
+              {saveButton}
+              {setupButton}
+            </Box>
+          )}
           {proj.names.map(name => {
             const run = scriptRuns[name]
             if (!run) return null
@@ -809,47 +832,50 @@ export const register: Register = on => {
           {gh.phase === 'done' && gh.url && <Text color="suggestion">{`  ${gh.url}`}</Text>}
         </Box>
 
-        <Box flexDirection="column">
-          {head('skills', 'Skills', ownSkills.length + builtinSkills.length, activeOf([...ownSkills, ...builtinSkills], skillKey), true)}
-          {opened('skills', true) && (
-            <Box flexDirection="column">
-              {ownSkills.length === 0 && <Text dimColor>No skills of your own.</Text>}
-              {sortSkills(ownSkills).map(s => skillRow(s))}
-              {drawer('skills:builtin', 'Built-in', sortSkills(builtinSkills), s => skillRow(s, '  '), activeOf(builtinSkills, skillKey))}
-            </Box>
-          )}
-        </Box>
+        {/* The session lists sit on the dashboard's grey (desktop; the terminal keeps its own background). */}
+        <Box flexDirection="column" {...(Svg ? { backgroundColor: '#262626', paddingX: 2, paddingY: 1 } : {})}>
+          <Box flexDirection="column">
+            {head('skills', 'Skills', ownSkills.length + builtinSkills.length, activeOf([...ownSkills, ...builtinSkills], skillKey), true)}
+            {opened('skills', true) && (
+              <Box flexDirection="column">
+                {ownSkills.length === 0 && <Text dimColor>No skills of your own.</Text>}
+                {sortSkills(ownSkills).map(s => skillRow(s))}
+                {drawer('skills:builtin', 'Built-in', sortSkills(builtinSkills), s => skillRow(s, '  '), activeOf(builtinSkills, skillKey))}
+              </Box>
+            )}
+          </Box>
 
-        <Box flexDirection="column">
-          {head('mcp', 'MCP Servers', ownServers.length + desktopServers.length, activeOf([...ownServers, ...desktopServers], serverKey), true)}
-          {opened('mcp', true) && (
-            <Box flexDirection="column">
-              {ownServers.length === 0 && <Text dimColor>No servers of your own.</Text>}
-              {sortServers(ownServers).map(s => serverRow(s))}
-              {drawer('mcp:builtin', 'Built-in (Claude Desktop)', sortServers(desktopServers), s => serverRow(s, '  '), activeOf(desktopServers, serverKey))}
-            </Box>
-          )}
-        </Box>
+          <Box flexDirection="column">
+            {head('mcp', 'MCP Servers', ownServers.length + desktopServers.length, activeOf([...ownServers, ...desktopServers], serverKey), true)}
+            {opened('mcp', true) && (
+              <Box flexDirection="column">
+                {ownServers.length === 0 && <Text dimColor>No servers of your own.</Text>}
+                {sortServers(ownServers).map(s => serverRow(s))}
+                {drawer('mcp:builtin', 'Built-in (Claude Desktop)', sortServers(desktopServers), s => serverRow(s, '  '), activeOf(desktopServers, serverKey))}
+              </Box>
+            )}
+          </Box>
 
-        <Box flexDirection="column">
-          {head('connectors', 'Connectors', connectors.length, activeOf(connectors, serverKey), true)}
-          {opened('connectors', true) && (
-            <Box flexDirection="column">
-              {connectors.length === 0 && <Text dimColor>No Claude account connectors in this session.</Text>}
-              {sortServers(connectors).map(s => serverRow(s))}
-            </Box>
-          )}
-        </Box>
+          <Box flexDirection="column">
+            {head('connectors', 'Connectors', connectors.length, activeOf(connectors, serverKey), true)}
+            {opened('connectors', true) && (
+              <Box flexDirection="column">
+                {connectors.length === 0 && <Text dimColor>No Claude account connectors in this session.</Text>}
+                {sortServers(connectors).map(s => serverRow(s))}
+              </Box>
+            )}
+          </Box>
 
-        <Box flexDirection="column">
-          {head('plugins', 'Plugins', pluginList.length, pluginList.filter(pluginBusy).length, true)}
-          {opened('plugins', true) && (
-            <Box flexDirection="column">
-              {ownPlugins.length === 0 && <Text dimColor>No plugins of your own.</Text>}
-              {order(ownPlugins, pluginBusy, pluginUsed).map(p => pluginBlock(p))}
-              {drawer('plugins:builtin', 'Built-in (Anthropic)', order(builtinPlugins, pluginBusy, pluginUsed), p => pluginBlock(p, '  '), builtinPlugins.filter(pluginBusy).length)}
-            </Box>
-          )}
+          <Box flexDirection="column">
+            {head('plugins', 'Plugins', pluginList.length, pluginList.filter(pluginBusy).length, true)}
+            {opened('plugins', true) && (
+              <Box flexDirection="column">
+                {ownPlugins.length === 0 && <Text dimColor>No plugins of your own.</Text>}
+                {order(ownPlugins, pluginBusy, pluginUsed).map(p => pluginBlock(p))}
+                {drawer('plugins:builtin', 'Built-in (Anthropic)', order(builtinPlugins, pluginBusy, pluginUsed), p => pluginBlock(p, '  '), builtinPlugins.filter(pluginBusy).length)}
+              </Box>
+            )}
+          </Box>
         </Box>
       </Box>
     )
