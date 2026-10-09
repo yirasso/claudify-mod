@@ -1,9 +1,3 @@
-/** A skill the session lists; `plugin` is the plugin that brings it. */
-export type SkillRow = { name: string; source: string; plugin?: string }
-
-/** An MCP server or connector: its name as /mcp lists it, its tools' prefix, and how many tools it has. */
-export type ServerRow = { name: string; wire: string; tools: number }
-
 /** A project script running (or that ran): its state, its tree's PID, its last lines and its address. */
 export type ScriptRun = {
   status: 'running' | 'stopping' | 'exited'
@@ -38,24 +32,12 @@ export type GithubFlow = {
 declare module 'claude-code' {
   interface PluginState {
     'claudify': {
-      skills: SkillRow[]
-      servers: ServerRow[]
-      /** What is in use right now: `skill:<name>` or `mcp:<prefix>`, with how many calls are in flight. */
-      busy: Record<string, number>
-      /** When each was last used, in ms. */
-      used: Record<string, number>
-      /** Ticks every 30 s, so "resets in" and "x min ago" keep moving. */
-      tick: number
-      /** The project's scripts the pane can run, and its checks. */
+      /** The project's scripts the band can run, and its checks. */
       project: ProjectScripts
       /** Each script whose button was pressed, by name. */
       runs: Record<string, ScriptRun>
-      /** What is expanded or collapsed in the pane (sections, drawers, plugins), by id. */
-      open: Record<string, boolean>
       /** The GitHub button's flow. */
       github: GithubFlow
-      /** Whether the pane is open, for the band's Show / Hide button. */
-      paneOpen: boolean
     }
   }
 }

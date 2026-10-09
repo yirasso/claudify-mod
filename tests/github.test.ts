@@ -40,10 +40,10 @@ for (const c of CASES) {
     on('settings.read', async () => ({ value: {} }) as never)
     on('session.usage', async () => ({ value: { startedAt: 0, context: {}, rateLimits: [] } }) as never)
     on('tool.list', async () => ({ value: [] }))
-    on('ui.open', async () => ({ value: {} }) as never)
-    on('command.register', async () => ({ value: undefined }) as never)
 
-    await $.command.run({ command: 'claudify', args: '', origin: { kind: 'user' } } as never)
+    on('session.start', async () => ({ cwd: 'C:/Dev/Nau' }) as never)
+
+    await $.session.start({ cwd: 'C:/Dev/Nau', surface: 'terminal', isInteractive: true } as never)
     const ui = await $.ui.mount({ plugin: 'claudify', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false } as never })
     expect((await ui.find({ key: 'github:start' }))?.text).toContain(c.button)
 

@@ -1,128 +1,14 @@
-// The "Claude" pane: the project (its dev/start buttons and checks), the account's usage limits (the 5-hour
-// and 7-day windows), and the session's skills, MCP servers, connectors and plugins. A skill lights up when
-// it is called (through the Skill tool or as /name) and stays lit until the turn ends; a server lights up
-// while one of its tools runs.
+// The Claudify band above the prompt: the project's actions (Start/Stop Project, Save Changes, Setup Project,
+// Compact), with the script output and the GitHub confirm flow under them.
 
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, RenderChildren } from 'claude-code'
+import type { EngineInterface, Register } from 'claude-code'
 
-import type { GithubFlow, GithubPlan, ProjectScripts, ScriptRun, ServerRow, SkillRow } from '../types'
+import type { GithubFlow, GithubPlan, ProjectScripts, ScriptRun } from '../types'
 
-const PANE = 'claudify'
-const TITLE = 'Claude'
-
-const skills = atom({ plugin: 'claudify', key: 'skills' } as const, [])
-const servers = atom({ plugin: 'claudify', key: 'servers' } as const, [])
-const busy = atom({ plugin: 'claudify', key: 'busy' } as const, {})
-const used = atom({ plugin: 'claudify', key: 'used' } as const, {})
-const tick = atom({ plugin: 'claudify', key: 'tick' } as const, 0)
 const project = atom({ plugin: 'claudify', key: 'project' } as const, { pm: 'npm', names: [], graphify: null, github: null, branch: null, ponytail: null, git: true })
 const runs = atom({ plugin: 'claudify', key: 'runs' } as const, {})
-const open = atom({ plugin: 'claudify', key: 'open' } as const, {})
 const github = atom({ plugin: 'claudify', key: 'github' } as const, { phase: 'idle', plan: 'push', log: [] })
-const paneOpen = atom({ plugin: 'claudify', key: 'paneOpen' } as const, false)
-
-/** An MCP tool's server prefix: `mcp__claude_ai_Gmail__create_draft` → `claude_ai_Gmail`. */
-const wireOf = (tool: string): string | null => {
-  const m = /^mcp__(.+?)__/.exec(tool)
-  return m?.[1] ?? null
-}
-
-/** "3 min ago", for what was used recently (up to an hour). */
-function ago(at: number | undefined, now: number): string {
-  if (!at) return ''
-  const min = Math.floor((now - at) / 60_000)
-  if (min < 1) return 'just now'
-  if (min < 60) return `${min} min ago`
-  return ''
-}
-
-/** A server named by a UUID: a Claude account connector that the Claude Desktop app hands to the session. */
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-
-/** The products, by the word their tools' descriptions keep repeating. */
-const BRANDS: [word: RegExp, name: string][] = [
-  [/\bGmail\b/g, 'Gmail'],
-  [/\bGoogle Drive\b|\bDrive\b/g, 'Google Drive'],
-  [/\bGoogle Calendar\b|\bcalendars?\b/gi, 'Google Calendar'],
-  [/\bSupabase\b/g, 'Supabase'],
-  [/\bVercel\b/g, 'Vercel'],
-  [/\bMobbin\b/g, 'Mobbin'],
-  [/\bOriginkit\b/gi, 'Originkit'],
-  [/\bGitHub\b/g, 'GitHub'],
-  [/\bNotion\b/g, 'Notion'],
-  [/\bSlack\b/g, 'Slack'],
-  [/\bLinear\b/g, 'Linear'],
-  [/\bFigma\b/g, 'Figma'],
-  [/\bStripe\b/g, 'Stripe'],
-  [/\bHubSpot\b/g, 'HubSpot'],
-  [/\bAsana\b/g, 'Asana'],
-  [/\bJira\b|\bAtlassian\b/g, 'Atlassian']
-]
-
-/**
- * The name of a Claude account connector the session only knows by its UUID: from the tools it has (for the
- * ones whose descriptions never name the product) or the brand its tools' descriptions repeat the most.
- */
-function guessConnector(tools: { name: string; description: string }[]): string | null {
-  const has = (n: string): boolean => tools.some(t => t.name === n)
-  if (has('show_widget') && has('read_me')) return 'Visualize'
-  if (has('guide') && has('batch')) return 'Claude Docs'
-  if (has('create_event') && has('list_calendars')) return 'Google Calendar'
-  const text = tools.map(t => t.description).join(' ')
-  let best: string | null = null
-  let most = 0
-  for (const [word, name] of BRANDS) {
-    const n = text.match(word)?.length ?? 0
-    if (n > most) {
-      most = n
-      best = name
-    }
-  }
-  return best
-}
-
-/** The Claude Desktop app's own pieces, which it connects to every session. */
-const DESKTOP_PIECES = ['Claude_Browser', 'Claude_Preview', 'claude-in-chrome', 'computer-use', 'terminal', 'visualize', 'scheduled-tasks', 'mcp-registry']
-const isDesktopPiece = (wire: string): boolean => wire.startsWith('ccd_') || DESKTOP_PIECES.includes(wire)
-
-/** The plugin behind an MCP server a plugin brings (`plugin_supabase_supabase` → `supabase`). */
-const pluginOfServer = (wire: string): string | null => /^plugin_([^_]+)_/.exec(wire)?.[1] ?? null
-
-/** The plugins that come with Claude (the Anthropic skills the Claude Desktop app keeps). */
-const isBuiltinPlugin = (name: string): boolean => name.startsWith('anthropic')
-
-/** Reads the session's skills and servers. */
-async function refresh($: EngineInterface): Promise<void> {
-  const usage = await $.session.usage({ breakdown: 'summary' })
-  const b = usage.context.breakdown
-  const skillRows: SkillRow[] = (b?.skills?.skillFrontmatter ?? []).map(s => ({ name: s.name, source: s.source, ...(s.pluginName ? { plugin: s.pluginName } : {}) }))
-  await update($, skills, () => skillRows.sort((x, y) => x.name.localeCompare(y.name)))
-  // The servers: those of the tools the model has, with the name /mcp gives them when it is known.
-  const names = new Map<string, string>()
-  const counts = new Map<string, number>()
-  for (const t of b?.mcpTools ?? []) {
-    const wire = wireOf(t.name)
-    if (!wire) continue
-    names.set(wire, t.serverName)
-    counts.set(wire, (counts.get(wire) ?? 0) + 1)
-  }
-  const tools = new Map<string, { name: string; description: string }[]>()
-  for (const t of await $.tool.list()) {
-    if (!t.mcp) continue
-    const wire = wireOf(t.name)
-    if (!wire) continue
-    if (!counts.has(wire)) counts.set(wire, 0)
-    if (!b?.mcpTools?.length) counts.set(wire, (counts.get(wire) ?? 0) + 1)
-    tools.set(wire, [...(tools.get(wire) ?? []), { name: t.name.slice(`mcp__${wire}__`.length), description: t.description }])
-  }
-  const rows: ServerRow[] = [...counts].map(([wire, n]) => {
-    const known = names.get(wire)
-    const name = known && !UUID.test(known) ? known : UUID.test(wire) ? (guessConnector(tools.get(wire) ?? []) ?? `Connector ${wire.slice(0, 8)}`) : wire.replace(/_/g, ' ')
-    return { wire, tools: n, name }
-  })
-  await update($, servers, () => rows.sort((x, y) => x.name.localeCompare(y.name)))
-}
 
 // ——— The project: the "dev" and "start" buttons and the checks ———
 
@@ -341,27 +227,6 @@ async function runGithub($: EngineInterface): Promise<void> {
   await readProject($)
 }
 
-/** Opens the pane and remembers it is open (the band's button shows "Close"). */
-async function openPane($: EngineInterface): Promise<void> {
-  const r = await $.ui.open({ id: PANE, title: TITLE })
-  await update($, paneOpen, () => r.isPlaced !== false)
-}
-
-/** Closes the pane (the band's button shows "Open" again). */
-async function closePane($: EngineInterface): Promise<void> {
-  await $.ui.close({ id: PANE }).catch(() => undefined)
-  await update($, paneOpen, () => false)
-}
-
-/** Whether the pane is drawn now; the atom answers when the host cannot list the panes. */
-async function isPaneOpen($: EngineInterface): Promise<boolean> {
-  try {
-    return (await $.ui.panes()).some(pane => pane.id === PANE && pane.isPlaced)
-  } catch {
-    return read($, paneOpen)
-  }
-}
-
 type Ui = ReturnType<EngineInterface['ui']['resolve']>
 
 /**
@@ -454,73 +319,30 @@ function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns:
     </Box>
   )
 }
-
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
-    await $.command.register({ name: 'claudify', description: 'Open or close the Claude pane: usage limits, project, skills, MCP servers, connectors and plugins' })
     // A mod reload kills the wrapper but not the tree: whatever was left running is ended here.
     for (const [name, run] of Object.entries(await read($, runs))) {
       if (run.status === 'exited') continue
       if (run.pid) await killTree($, run.pid)
-      const stopped: ScriptRun = { ...run, status: 'exited', code: null, tail: [...run.tail, 'Stopped when the pane reloaded.'].slice(-TAIL) }
+      const stopped: ScriptRun = { ...run, status: 'exited', code: null, tail: [...run.tail, 'Stopped when the mod reloaded.'].slice(-TAIL) }
       await update($, runs, all => ({ ...all, [name]: stopped }))
     }
-    void openPane($)
     await readProject($)
-    await refresh($)
-    $.clock.every(30_000, () => void update($, tick, n => n + 1))
-    // Everything stays current: a removed connector, a deleted skill or a new server shows within 10 s.
-    $.clock.every(10_000, () => void refresh($).then(() => readProject($)).catch(() => undefined))
+    // The project's checks stay current: a new graph, a plugin enabled or a new remote shows within 10 s.
+    $.clock.every(10_000, () => void readProject($).catch(() => undefined))
     return started
   })
 
-  // /claudify toggles the pane: it closes it when it is open and opens it otherwise.
-  on('command.run', { command: 'claudify' }, async $ => {
-    if (await isPaneOpen($)) {
-      await closePane($)
-      return { text: 'Closed the "Claude" pane.' }
-    }
-    await openPane($)
-    await readProject($)
-    await refresh($)
-    return { text: 'Opened the "Claude" pane.' }
-  })
-
-  // The pane closed (its X, Escape, or the band's button): the band shows "Open" again.
-  on('ui.close', async ($, e, next) => {
-    const done = await next(e)
-    if (e.id === PANE) await update($, paneOpen, () => false)
-    return done
-  })
-
-  // The band above the prompt: one button that opens and closes the pane, always at hand (a mod cannot put
-  // a button in the Claude Desktop title bar next to the terminal button).
+  // The band above the prompt: the project's actions, always at hand.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
-    const { Box, Button } = $.ui.resolve(e)
-    const isOpen = await read($, paneOpen)
-    const toggle = (
-      <Box flexDirection="row" justifyContent="flex-end">
-        <Button
-          key="band:toggle"
-          plain
-          dimColor
-          label={isOpen ? '◧ Hide Claude panel' : '◧ Show Claude panel'}
-          onPress={() => void (isOpen ? closePane($) : openPane($))}
-        />
-      </Box>
-    )
-    // The pane's actions again, so they are at hand without the pane open.
+    const { Box } = $.ui.resolve(e)
     const proj = await read($, project)
     const scriptRuns = await read($, runs)
     const gh = await read($, github)
-    return (
-      <Box flexDirection="column">
-        {toggle}
-        {actionBar($, $.ui.resolve(e), proj, scriptRuns, gh)}
-      </Box>
-    )
+    return <Box flexDirection="column">{actionBar($, $.ui.resolve(e), proj, scriptRuns, gh)}</Box>
   })
 
   // When the session ends, whatever the buttons left running is ended too.
@@ -529,219 +351,10 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // A skill typed as /name (or preloaded) lights up until the turn ends.
-  on('skill.prompt', async ($, e, next) => {
-    await update($, busy, all => ({ ...all, [`skill:${e.skill}`]: 1 }))
-    await update($, used, all => ({ ...all, [`skill:${e.skill}`]: Date.now() }))
-    return next(e)
-  })
-
-  on('tool.call', async ($, e, next) => {
-    // The Skill tool: the skill stays lit until the turn ends (it is what the model is following).
-    if (e.tool === 'Skill') {
-      const name = String((e as { skill?: unknown }).skill ?? '')
-      if (name) {
-        await update($, busy, all => ({ ...all, [`skill:${name}`]: 1 }))
-        await update($, used, all => ({ ...all, [`skill:${name}`]: Date.now() }))
-      }
-      return next(e)
-    }
-    // An MCP tool: its server stays lit while it runs.
-    const wire = wireOf(e.tool)
-    if (!wire) return next(e)
-    const key = `mcp:${wire}`
-    await update($, busy, all => ({ ...all, [key]: (all[key] ?? 0) + 1 }))
-    await update($, used, all => ({ ...all, [key]: Date.now() }))
-    try {
-      return await next(e)
-    } finally {
-      await update($, busy, all => {
-        const left = (all[key] ?? 1) - 1
-        const out = { ...all }
-        if (left > 0) out[key] = left
-        else delete out[key]
-        return out
-      })
-    }
-  })
-
-  // When the turn ends, the skills go dark and the lists are read again (a new skill or server).
+  // When the turn ends, the project is read again (a graph built, a plugin installed).
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
-    await update($, busy, all => Object.fromEntries(Object.entries(all).filter(([k]) => !k.startsWith('skill:'))))
     await readProject($)
-    await refresh($)
     return done
-  })
-
-  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Text, Button } = $.ui.resolve(e)
-    await read($, tick)
-    const isOpen = await read($, open)
-    const now = Date.now()
-    const listedSkills = await read($, skills)
-    const listedServers = await read($, servers)
-    const live = await read($, busy)
-    const last = await read($, used)
-    // What is in use right now always shows, even before the list has it (a server connected just now);
-    // what was only used before shows only while it still exists.
-    const seen = Object.keys(live)
-    const allSkills: SkillRow[] = [
-      ...listedSkills,
-      ...seen.filter(k => k.startsWith('skill:') && !listedSkills.some(s => `skill:${s.name}` === k)).map(k => ({ name: k.slice(6), source: '' }))
-    ]
-    const allServers: ServerRow[] = [
-      ...listedServers,
-      ...seen.filter(k => k.startsWith('mcp:') && !listedServers.some(s => `mcp:${s.wire}` === k)).map(k => ({ wire: k.slice(4), name: k.slice(4).replace(/_/g, ' '), tools: 0 }))
-    ]
-
-    // ——— Sorting: plugins apart, and in each category what comes built in goes in a drawer ———
-    const pluginOfSkill = (s: SkillRow): string | null => s.plugin ?? (s.name.includes(':') ? (s.name.split(':')[0] ?? null) : null)
-    const ownSkills = allSkills.filter(s => !pluginOfSkill(s) && s.source !== 'built-in')
-    const builtinSkills = allSkills.filter(s => !pluginOfSkill(s) && s.source === 'built-in')
-    const connectors = allServers.filter(s => UUID.test(s.wire))
-    const pluginServers = allServers.filter(s => pluginOfServer(s.wire))
-    const ownServers = allServers.filter(s => !UUID.test(s.wire) && !pluginOfServer(s.wire) && !isDesktopPiece(s.wire))
-    const desktopServers = allServers.filter(s => !UUID.test(s.wire) && !pluginOfServer(s.wire) && isDesktopPiece(s.wire))
-    // The plugins: each one's skills and servers.
-    const plugins = new Map<string, { skills: SkillRow[]; servers: ServerRow[] }>()
-    const pluginEntry = (name: string) => plugins.get(name) ?? (plugins.set(name, { skills: [], servers: [] }).get(name) as { skills: SkillRow[]; servers: ServerRow[] })
-    for (const s of allSkills) {
-      const p = pluginOfSkill(s)
-      if (p) pluginEntry(p).skills.push(s)
-    }
-    for (const s of pluginServers) pluginEntry(pluginOfServer(s.wire) as string).servers.push(s)
-    const pluginList = [...plugins].map(([name, parts]) => ({ name, ...parts }))
-    const ownPlugins = pluginList.filter(p => !isBuiltinPlugin(p.name))
-    const builtinPlugins = pluginList.filter(p => isBuiltinPlugin(p.name))
-
-    const skillKey = (s: SkillRow): string => `skill:${s.name}`
-    const serverKey = (s: ServerRow): string => `mcp:${s.wire}`
-    const pluginBusy = (p: { skills: SkillRow[]; servers: ServerRow[] }): boolean => p.skills.some(s => live[skillKey(s)]) || p.servers.some(s => live[serverKey(s)])
-    const pluginUsed = (p: { skills: SkillRow[]; servers: ServerRow[] }): number => Math.max(0, ...p.skills.map(s => last[skillKey(s)] ?? 0), ...p.servers.map(s => last[serverKey(s)] ?? 0))
-
-    // What is lit first, then what was used recently, then by name.
-    const order = <T extends { name: string }>(list: T[], isOn: (x: T) => boolean, at: (x: T) => number): T[] =>
-      [...list].sort((a, b) => Number(isOn(b)) - Number(isOn(a)) || at(b) - at(a) || a.name.localeCompare(b.name))
-    const sortSkills = (list: SkillRow[]): SkillRow[] => order(list, s => !!live[skillKey(s)], s => last[skillKey(s)] ?? 0)
-    const sortServers = (list: ServerRow[]): ServerRow[] => order(list, s => !!live[serverKey(s)], s => last[serverKey(s)] ?? 0)
-
-    const toggle = (id: string, fallback: boolean): void => void update($, open, all => ({ ...all, [id]: !(all[id] ?? fallback) }))
-    const opened = (id: string, fallback: boolean): boolean => isOpen[id] ?? fallback
-
-    /** A header that collapses and expands: the arrow, the title, how many, and how many are in use. */
-    const head = (id: string, title: string, count: number | null, active: number, fallback: boolean, drawer = false) => (
-      <Box flexDirection="row" gap={1} alignItems="center">
-        <Button
-          key={`toggle:${id}`}
-          plain
-          dimColor={drawer}
-          label={`${opened(id, fallback) ? '▾' : '▸'} ${title}${count === null ? '' : ` · ${count}`}${active ? ` · ${active} in use` : ''}`}
-          onPress={() => toggle(id, fallback)}
-        />
-      </Box>
-    )
-
-    /** A row: the dot (green while in use), the name, and the rest in small print. */
-    const row = (key: string, name: string, extra: string, indent = '') => {
-      const active = !!live[key]
-      const when = active ? '' : ago(last[key], now)
-      return (
-        <Box flexDirection="row" gap={1} alignItems="center">
-          <Text color={active ? 'success' : undefined} dimColor={!active}>
-            {`${indent}${active ? '●' : '○'}`}
-          </Text>
-          <Text bold={active} wrap="truncate-end">
-            {name}
-          </Text>
-          {(extra || when || active) && (
-            <Text dimColor wrap="truncate-end">
-              {active ? 'in use' : [extra, when].filter(Boolean).join(' · ')}
-            </Text>
-          )}
-        </Box>
-      )
-    }
-
-    const skillRow = (s: SkillRow, indent = '') => row(skillKey(s), s.name, '', indent)
-    const serverRow = (s: ServerRow, indent = '') => row(serverKey(s), s.name, s.tools ? `${s.tools} tools` : '', indent)
-
-    /** A drawer inside a category (what comes built in), closed by default. */
-    const drawer = <T,>(id: string, title: string, list: T[], draw: (x: T) => RenderChildren, active: number) =>
-      list.length > 0 && (
-        <Box flexDirection="column">
-          {head(id, title, list.length, active, false, true)}
-          {opened(id, false) && list.map(x => draw(x))}
-        </Box>
-      )
-
-    /** A plugin: its row and, expanded, the skills and servers it brings. */
-    const pluginBlock = (p: { name: string; skills: SkillRow[]; servers: ServerRow[] }, indent = '') => {
-      const id = `plugin:${p.name}`
-      const active = pluginBusy(p)
-      const parts = [p.skills.length ? `${p.skills.length} skills` : '', p.servers.length ? `${p.servers.length} servers` : ''].filter(Boolean).join(' · ')
-      return (
-        <Box flexDirection="column">
-          <Button
-            key={`toggle:${id}`}
-            plain
-            label={`${indent}${opened(id, false) ? '▾' : '▸'} ${active ? '● ' : '○ '}${p.name}${parts ? `  ${parts}` : ''}${active ? ' · in use' : ''}`}
-            onPress={() => toggle(id, false)}
-          />
-          {opened(id, false) && sortSkills(p.skills).map(s => skillRow(s, `${indent}    `))}
-          {opened(id, false) && sortServers(p.servers).map(s => serverRow(s, `${indent}    `))}
-        </Box>
-      )
-    }
-
-    const activeOf = <T,>(list: T[], key: (x: T) => string): number => list.filter(x => live[key(x)]).length
-    return (
-      <Box flexDirection="column">
-        <Box flexDirection="column">
-          <Box flexDirection="column">
-            {head('skills', 'Skills', ownSkills.length + builtinSkills.length, activeOf([...ownSkills, ...builtinSkills], skillKey), true)}
-            {opened('skills', true) && (
-              <Box flexDirection="column">
-                {ownSkills.length === 0 && <Text dimColor>No skills of your own.</Text>}
-                {sortSkills(ownSkills).map(s => skillRow(s))}
-                {drawer('skills:builtin', 'Built-in', sortSkills(builtinSkills), s => skillRow(s, '  '), activeOf(builtinSkills, skillKey))}
-              </Box>
-            )}
-          </Box>
-
-          <Box flexDirection="column">
-            {head('mcp', 'MCP Servers', ownServers.length + desktopServers.length, activeOf([...ownServers, ...desktopServers], serverKey), true)}
-            {opened('mcp', true) && (
-              <Box flexDirection="column">
-                {ownServers.length === 0 && <Text dimColor>No servers of your own.</Text>}
-                {sortServers(ownServers).map(s => serverRow(s))}
-                {drawer('mcp:builtin', 'Built-in (Claude Desktop)', sortServers(desktopServers), s => serverRow(s, '  '), activeOf(desktopServers, serverKey))}
-              </Box>
-            )}
-          </Box>
-
-          <Box flexDirection="column">
-            {head('connectors', 'Connectors', connectors.length, activeOf(connectors, serverKey), true)}
-            {opened('connectors', true) && (
-              <Box flexDirection="column">
-                {connectors.length === 0 && <Text dimColor>No Claude account connectors in this session.</Text>}
-                {sortServers(connectors).map(s => serverRow(s))}
-              </Box>
-            )}
-          </Box>
-
-          <Box flexDirection="column">
-            {head('plugins', 'Plugins', pluginList.length, pluginList.filter(pluginBusy).length, true)}
-            {opened('plugins', true) && (
-              <Box flexDirection="column">
-                {ownPlugins.length === 0 && <Text dimColor>No plugins of your own.</Text>}
-                {order(ownPlugins, pluginBusy, pluginUsed).map(p => pluginBlock(p))}
-                {drawer('plugins:builtin', 'Built-in (Anthropic)', order(builtinPlugins, pluginBusy, pluginUsed), p => pluginBlock(p, '  '), builtinPlugins.filter(pluginBusy).length)}
-              </Box>
-            )}
-          </Box>
-        </Box>
-      </Box>
-    )
   })
 }

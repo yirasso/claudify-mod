@@ -18,10 +18,10 @@ for (const [graph, remote] of [
     })
     on('session.usage', async () => ({ value: { startedAt: 0, context: {}, rateLimits: [] } }) as never)
     on('tool.list', async () => ({ value: [] }))
-    on('ui.open', async () => ({ value: {} }) as never)
-    on('command.register', async () => ({ value: undefined }) as never)
 
-    await $.command.run({ command: 'claudify', args: '', origin: { kind: 'user' } } as never)
+    on('session.start', async () => ({ cwd: 'C:/Dev/Nau' }) as never)
+
+    await $.session.start({ cwd: 'C:/Dev/Nau', surface: 'terminal', isInteractive: true } as never)
     const ui = await $.ui.mount({ plugin: 'claudify', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false } as never })
     // With a graph and Ponytail there is nothing left to set up: the button turns into dim text.
     expect(!!(await ui.find({ key: 'project:setup' }))).toBe(!graph)

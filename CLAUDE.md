@@ -1,9 +1,8 @@
 # Claudify plugin
 
-A Claude Code plugin (a "mod": function hooks, no MCP server) with two parts:
+A Claude Code plugin (a "mod": function hooks, no MCP server) with one part: the **band above the prompt** with four action buttons (Start/Stop Project, Save Changes, Setup Project, Compact), and the script output and the GitHub confirm flow under them.
 
-- the **pane** (`/claudify`): collapsible lists of the session's skills, MCP servers, connectors and plugins, each lit up while in use. Nothing else is in the pane;
-- the **band above the prompt**: the «Show/Hide Claude panel» button and four action buttons (Start/Stop Project, Save Changes, Setup Project, Compact), with the script output and the GitHub confirm flow under them.
+The pane with the session's skills, MCP servers, connectors and plugins moved on 2026-10-09 to its own plugin, `setup-info`, in `C:\Dev\Claude Setup Info`.
 
 The owner is Tomás. He talks in European Portuguese (never Brazilian); the plugin's UI and code are in English. Repo: https://github.com/yirasso/claudify (branch `main`).
 
@@ -16,7 +15,7 @@ The owner is Tomás. He talks in European Portuguese (never Brazilian); the plug
 - **Every change ships.** After each change (the three checks below passing): bump `version`, commit, push to `main`, `claude plugin update claudify@tomas-plugins` and `/reload-plugins`, so Tomás sees it in Claude straight away. No separate HTML mock-up: the UI is designed directly in `hooks/register.tsx`.
 - **Before finishing a change**, all three must pass:
   - `claude plugin validate .`
-  - `claude plugin test .` (17 tests, 6 files)
+  - `claude plugin test .` (9 tests, 4 files)
   - the typecheck: `npx -y -p typescript tsc -p tsconfig.json` (TypeScript is not installed in the repo, so plain `npx tsc` fails), against the API types in `.claude-plugin/types/`. That folder is generated and git-ignored; the plugin-authoring skill regenerates it.
 - **For the API, load the `plugin-authoring` skill** before touching the hooks: it has the full contract.
 
@@ -24,11 +23,11 @@ The owner is Tomás. He talks in European Portuguese (never Brazilian); the plug
 
 - `hooks/hooks.json`: `{ "modules": ["./register.tsx"] }`.
 - `hooks/register.tsx`: every hook.
-  - **Events handled:** `session.start`, `command.run` (`/claudify`, which toggles the pane), `skill.prompt`, `tool.call`, `turn.complete`, `ui.render`, `ui.close`, `session.end`.
-  - **What it renders:** `Pane` (the lists) and `AbovePrompt` (the band: toggle button, `actionBar`).
-  - **Its functions:** `refresh` (every 10 s, via `$.clock.every`), `readProject`, `runScript`/`stopScript`/`killTree`, `prepareGithub`/`runGithub` (the commit message comes from `$.model.complete` with Sonnet 5.5 at medium effort, and nothing runs before the user confirms), `openPane` and `guessConnector` (claude.ai connectors arrive as UUIDs, so their names are guessed).
-- `types/index.d.ts`: the state contract (`PluginState`). The atoms are `skills`, `servers`, `busy`, `used`, `tick`, `project`, `runs`, `open`, `github` and `paneOpen`.
-- `tests/`: `actions`, `board`, `checks`, `connectors`, `github`, `scripts`.
+  - **Events handled:** `session.start`, `turn.complete`, `ui.render` (`AbovePrompt`), `session.end`.
+  - **What it renders:** `AbovePrompt` (the band: `actionBar`).
+  - **Its functions:** `readProject` (every 10 s, via `$.clock.every`), `runScript`/`stopScript`/`killTree`, `prepareGithub`/`runGithub` (the commit message comes from `$.model.complete` with Sonnet 5.5 at medium effort, and nothing runs before the user confirms), `actionBar`.
+- `types/index.d.ts`: the state contract (`PluginState`). The atoms are `project`, `runs` and `github`.
+- `tests/`: `actions`, `checks`, `github`, `scripts`.
 
 ## Rules learned the hard way
 
@@ -37,8 +36,6 @@ The owner is Tomás. He talks in European Portuguese (never Brazilian); the plug
 - **Atom refs** need literal plugin and key strings.
 - **`$`** may only be passed to top-level functions.
 - **`$.ui.resolve(e)`** gives the elements per surface: Box/Text/Button everywhere, Svg on desktop only.
-- **Opening the pane:** a pane opened without being asked seats only from 144 terminal columns. One opened on request (the command or the band button) always seats.
-- **Removed items:** show only what the session lists right now (`$.tool.list()`, `$.session.usage`). Otherwise removed skills and connectors stay in the pane.
 - **The graphify check** uses `$.session.cwd()` plus `graphify-out/graph.json`. `fs.list('.')` failed.
 - **Stopping a script** on Windows: `taskkill /T /F` exits with code 1. Show «stopped», not a failure.
 - **TS literal widening** in `update(...)`: type the records (`ScriptRun`, `GithubFlow`).
@@ -52,8 +49,8 @@ The owner is Tomás. He talks in European Portuguese (never Brazilian); the plug
 
 **Design (Tomás's feedback)**
 - No glass icons and no fancy decoration: he called a first card UI «bugado e feio».
-- He dropped the SVG dashboard (usage rings, project score, tiles) on 2026-10-09: the pane is only the four lists. Use real `Button`s, not drawings with labels laid over them.
+- He dropped the SVG dashboard (usage rings, project score, tiles) on 2026-10-09: the actions are real buttons. Use real `Button`s, not drawings with labels laid over them.
 
 ## Open
 
-- Not confirmed in Claude Desktop: how the band's buttons and the pane's lists look in Claude Desktop.
+- Not confirmed in Claude Desktop: how the band's buttons look in Claude Desktop.

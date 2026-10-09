@@ -17,11 +17,11 @@ for (const surface of SURFACES) {
     } as never)
     // Without a real session, the pane reads the rest as empty.
     on('session.usage', async () => ({ value: { startedAt: 0, context: {}, rateLimits: [] } }) as never)
-    on('ui.open', async () => ({ value: {} }) as never)
-    on('command.register', async () => ({ value: undefined }) as never)
     on('tool.list', async () => ({ value: [] }))
 
-    await $.command.run({ command: 'claudify', args: '', origin: { kind: 'user' } } as never)
+    on('session.start', async () => ({ cwd: 'C:/Dev/Nau' }) as never)
+
+    await $.session.start({ cwd: 'C:/Dev/Nau', surface: 'terminal', isInteractive: true } as never)
     const ui = await $.ui.mount({ plugin: 'claudify', surface, component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false } as never })
     expect((await ui.find({ key: 'script:dev' }))?.text).toContain('Start Project')
     expect(await ui.find({ key: 'script:start' })).toBeUndefined()
@@ -50,8 +50,6 @@ test('stopping a script with the button shows «stopped», not a failed exit', a
     return { value: { exitCode: 0, stdout: '', stderr: '' } } as never
   })
   on('session.usage', async () => ({ value: { startedAt: 0, context: {}, rateLimits: [] } }) as never)
-  on('ui.open', async () => ({ value: {} }) as never)
-  on('command.register', async () => ({ value: undefined }) as never)
   on('tool.list', async () => ({ value: [] }))
 
   // The test kit's engine has the clock too; its typings leave it out.
@@ -59,7 +57,8 @@ test('stopping a script with the button shows «stopped», not a failed exit', a
   const nap = async (_ms: number): Promise<void> => {
     for (let i = 0; i < 50; i++) await Promise.resolve()
   }
-  await $.command.run({ command: 'claudify', args: '', origin: { kind: 'user' } } as never)
+  on('session.start', async () => ({ cwd: 'C:/Dev/Nau' }) as never)
+  await $.session.start({ cwd: 'C:/Dev/Nau', surface: 'terminal', isInteractive: true } as never)
   const ui = await $.ui.mount({ plugin: 'claudify', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false } as never })
   void ui.press({ key: 'script:start' })
   for (let i = 0; i < 50 && !(await ui.find({ key: 'script:start' }))?.text.includes('Stop Project'); i++) await nap(10)
