@@ -558,7 +558,33 @@ async function openEditor($: EngineInterface): Promise<void> {
 /** The project's typecheck: tsc for a tsconfig.json (only a local install: no download), cargo check for Cargo. */
 async function typecheckCommand($: EngineInterface, cwd: string): Promise<string[] | null> {
   const windows = (await $.env.get('OS')) === 'Windows_NT'
-  if (await $.fs.exists(`${cwd}/tsconfig.json`).catch(() => false)) return [...(windows ? ['cmd', '/c'] : []), 'npx', '--no-install', 'tsc', '--noEmit', '-p', '.']
+  // A command line run through the shell, its words as separate arguments so `&&` stays the shell's.
+  const shell = (line: string) => (windows ? ['cmd', '/c', ...line.split(' ')] : ['sh', '-c', line])
+  // The project's own typecheck script knows its tsconfigs best.
+  try {
+    const pkg = JSON.parse(await $.fs.read(`${cwd}/package.json`)) as { scripts?: Record<string, unknown> }
+    const script = ['typecheck', 'type-check', 'check-types'].find(s => typeof pkg.scripts?.[s] === 'string')
+    if (script) {
+      const has = (file: string) => $.fs.exists(`${cwd}/${file}`).catch(() => false)
+      const pm = (await has('pnpm-lock.yaml')) ? 'pnpm' : (await has('yarn.lock')) ? 'yarn' : (await has('bun.lockb')) || (await has('bun.lock')) ? 'bun' : 'npm'
+      return shell(`${pm} run ${script}`)
+    }
+  } catch {
+    // No package.json.
+  }
+  if (await $.fs.exists(`${cwd}/tsconfig.json`).catch(() => false)) {
+    // A root tsconfig that only lists references ("files": []) checks nothing: check each referenced one.
+    let refs: string[] = []
+    try {
+      const text = (await $.fs.read(`${cwd}/tsconfig.json`)).replace(/\/\*[\s\S]*?\*\/|^\s*\/\/.*$/gm, '')
+      const config = JSON.parse(text) as { files?: unknown[]; include?: unknown[]; references?: { path?: string }[] }
+      if (config.references?.length && !config.include?.length && !config.files?.length) refs = config.references.map(r => r.path ?? '').filter(Boolean)
+    } catch {
+      // Not plain JSON: the root alone.
+    }
+    if (refs.length) return shell(refs.map(r => `npx --no-install tsc --noEmit -p ${r}`).join(' && '))
+    return [...(windows ? ['cmd', '/c'] : []), 'npx', '--no-install', 'tsc', '--noEmit', '-p', '.']
+  }
   if (await $.fs.exists(`${cwd}/Cargo.toml`).catch(() => false)) return ['cargo', 'check', '--quiet', '--message-format', 'short']
   return null
 }

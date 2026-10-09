@@ -15,7 +15,7 @@ The owner is Tomás. He talks in European Portuguese (never Brazilian); the plug
 - **Every change ships.** After each change (the three checks below passing): bump `version`, commit, push to `main`, `claude plugin update claudify@tomas-plugins` and `/reload-plugins`, so Tomás sees it in Claude straight away. No separate HTML mock-up: the UI is designed directly in `hooks/register.tsx`.
 - **Before finishing a change**, all three must pass:
   - `claude plugin validate .`
-  - `claude plugin test .` (40 tests, 9 files)
+  - `claude plugin test .` (42 tests, 9 files)
   - the typecheck: `npx -y -p typescript tsc -p tsconfig.json` (TypeScript is not installed in the repo, so plain `npx tsc` fails), against the API types in `.claude-plugin/types/`. That folder is generated and git-ignored; the plugin-authoring skill regenerates it.
 - **For the API, load the `plugin-authoring` skill** before touching the hooks: it has the full contract.
 
@@ -36,7 +36,7 @@ The owner is Tomás. He talks in European Portuguese (never Brazilian); the plug
 
 - **Save Changes** shows the files waiting and turns primary with more than 15 or two hours after the last commit; after it, **↶ Undo** (10 s) reverts the commit and pushes the revert.
 - **A turn over a minute** ends with the done sound (`sounds/done.wav`, a chime generated for the band; PowerShell's SoundPlayer on Windows, `$.audio.play` elsewhere), unless the bell is off (`notify` atom, kept in `$.store`).
-- **The typecheck** (`checkTypes`) runs after each main-thread turn that changed code: `npx --no-install tsc --noEmit` for a tsconfig.json (no download: without a local TypeScript there is no dot), `cargo check` for Cargo. A red dot shows the first errors and `✦ Send N type errors to Claude`.
+- **The typecheck** (`checkTypes`) runs after each main-thread turn that changed code: the project's own `typecheck`/`type-check`/`check-types` script first; else `npx --no-install tsc --noEmit` on the tsconfig, or on each tsconfig a references-only root lists (electron-vite's root has `"files": []` and checks nothing); no download, so without a local TypeScript there is no dot; `cargo check` for Cargo. A red dot shows the first errors and `✦ Send N type errors to Claude`.
 - **`/claudify off`** hides the band and stops the automatic work in that project; kept in `$.store` as `off:<folder>`; `/claudify` (no argument) turns it on. There is no `/claudify on`.
 - **Save Changes checks for secrets** (`findSecrets`): secret-looking files (`.env*` but not `.env.example`, keys, credentials) and diff lines adding tokens (`sk-…`, `ghp_…`, `AKIA…`, private keys). It names the files, never the secret; **Leave them out (.gitignore)** ignores and unstages them, or **Commit & push anyway**.
 - **Pull** runs `git pull --rebase --autostash` (local changes and commits come back on top); if it stops on conflicts, **✦ Resolve conflicts with Claude** sends the files. A push GitHub refuses (newer commits) fetches so ↓ Pull shows.

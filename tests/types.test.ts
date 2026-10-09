@@ -95,3 +95,36 @@ test('/claudify off hides the band and stops the automatic work; /claudify bring
   expect(stored['off:c:/dev/nau']).toBeUndefined()
   expect((await ui.findAll({ type: 'Text' })).length > 0).toBe(true)
 })
+
+for (const [label, files, expected] of [
+  ["the project's typecheck script", { 'package.json': JSON.stringify({ scripts: { typecheck: 'tsc --noEmit -p tsconfig.web.json' } }), 'tsconfig.json': '{}' }, 'cmd /c npm run typecheck'],
+  [
+    'each tsconfig a references-only root lists',
+    { 'tsconfig.json': '{\n  // electron-vite\n  "files": [],\n  "references": [{ "path": "./tsconfig.node.json" }, { "path": "./tsconfig.web.json" }]\n}' },
+    'cmd /c npx --no-install tsc --noEmit -p ./tsconfig.node.json && npx --no-install tsc --noEmit -p ./tsconfig.web.json',
+  ],
+] as const) {
+  test(`the typecheck runs ${label}`, async ($, on) => {
+    const ran: string[] = []
+    const at = (path: string) => path.replace(/\\/g, '/').replace(/^C:\/Dev\/Nau\//, '')
+    on('fs.read', async (_$: unknown, e: { path: string }) => (at(e.path) in files ? { value: (files as Record<string, string>)[at(e.path)] } : { deny: 'ENOENT' }) as never)
+    on('fs.exists', async (_$: unknown, e: { path: string }) => ({ value: at(e.path) in files }) as never)
+    on('env.get', async (_$: unknown, e: { name: string }) => ({ value: e.name === 'OS' ? 'Windows_NT' : undefined }) as never)
+    on('settings.read', async () => ({ value: {} }) as never)
+    on('session.cwd', async () => ({ value: 'C:/Dev/Nau' }))
+    on('fs.list', async () => ({ value: [] }) as never)
+    on('process.run', async (_$: unknown, e: { argv: readonly string[] }) => {
+      const cmd = e.argv.join(' ')
+      ran.push(cmd)
+      return { value: { exitCode: 0, stdout: cmd === 'git status --porcelain' ? ' M src/app.ts\n' : cmd === 'git rev-parse --is-inside-work-tree' ? 'true\n' : '', stderr: '' } } as never
+    })
+    on('session.usage', async () => ({ value: { startedAt: 0, context: {}, rateLimits: [] } }) as never)
+    on('turn.complete', async () => ({ text: 'done' }) as never)
+    on('session.start', async () => ({ cwd: 'C:/Dev/Nau' }) as never)
+
+    await $.session.start({ cwd: 'C:/Dev/Nau', surface: 'desktop', isInteractive: true } as never)
+    await $.turn.complete({ reason: 'answer', answer: 'done', durationMs: 1000, isAborted: false, turnId: 't' } as never)
+    await settle()
+    expect(ran).toContain(expected)
+  })
+}
