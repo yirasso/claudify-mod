@@ -10,21 +10,21 @@ import { dashboard } from './cards'
 
 import type { GithubFlow, GithubPlan, Limit, ScriptRun, ServerRow, SkillRow } from '../types'
 
-const PANE = 'usage-board'
+const PANE = 'claudify'
 const TITLE = 'Claude'
 
-const limits = atom({ plugin: 'usage-board', key: 'limits' } as const, [])
-const skills = atom({ plugin: 'usage-board', key: 'skills' } as const, [])
-const servers = atom({ plugin: 'usage-board', key: 'servers' } as const, [])
-const busy = atom({ plugin: 'usage-board', key: 'busy' } as const, {})
-const used = atom({ plugin: 'usage-board', key: 'used' } as const, {})
-const tick = atom({ plugin: 'usage-board', key: 'tick' } as const, 0)
-const project = atom({ plugin: 'usage-board', key: 'project' } as const, { pm: 'npm', names: [], graphify: null, github: null, branch: null, ponytail: null, git: true })
-const runs = atom({ plugin: 'usage-board', key: 'runs' } as const, {})
-const open = atom({ plugin: 'usage-board', key: 'open' } as const, {})
-const github = atom({ plugin: 'usage-board', key: 'github' } as const, { phase: 'idle', plan: 'push', log: [] })
-const context = atom({ plugin: 'usage-board', key: 'context' } as const, null)
-const paneOpen = atom({ plugin: 'usage-board', key: 'paneOpen' } as const, false)
+const limits = atom({ plugin: 'claudify', key: 'limits' } as const, [])
+const skills = atom({ plugin: 'claudify', key: 'skills' } as const, [])
+const servers = atom({ plugin: 'claudify', key: 'servers' } as const, [])
+const busy = atom({ plugin: 'claudify', key: 'busy' } as const, {})
+const used = atom({ plugin: 'claudify', key: 'used' } as const, {})
+const tick = atom({ plugin: 'claudify', key: 'tick' } as const, 0)
+const project = atom({ plugin: 'claudify', key: 'project' } as const, { pm: 'npm', names: [], graphify: null, github: null, branch: null, ponytail: null, git: true })
+const runs = atom({ plugin: 'claudify', key: 'runs' } as const, {})
+const open = atom({ plugin: 'claudify', key: 'open' } as const, {})
+const github = atom({ plugin: 'claudify', key: 'github' } as const, { phase: 'idle', plan: 'push', log: [] })
+const context = atom({ plugin: 'claudify', key: 'context' } as const, null)
+const paneOpen = atom({ plugin: 'claudify', key: 'paneOpen' } as const, false)
 
 /** An MCP tool's server prefix: `mcp__claude_ai_Gmail__create_draft` → `claude_ai_Gmail`. */
 const wireOf = (tool: string): string | null => {

@@ -40,7 +40,7 @@ export type GithubFlow = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'usage-board': {
+    'claudify': {
       limits: Limit[]
       skills: SkillRow[]
       servers: ServerRow[]

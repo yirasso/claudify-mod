@@ -1,4 +1,4 @@
-# usage-board
+# Claudify
 
 A Claude Code plugin that adds a pane with what you usually check by hand while you work:
 
@@ -13,7 +13,7 @@ In the desktop app the pane shows a dashboard. In the terminal it shows the same
 
 ```bash
 claude plugin marketplace add yirasso/claudify
-claude plugin install usage-board@tomas-plugins
+claude plugin install claudify@tomas-plugins
 ```
 
 Start a new session afterwards. You can enable, disable or remove the plugin from `/plugin`.
@@ -40,4 +40,4 @@ claude plugin test .
 | `types/index.d.ts` | The plugin's state contract |
 | `tests/` | Tests for the pane, checks, connectors, scripts and GitHub flow |
 
-To load your working copy in a session, run `claude --plugin-dir <path to the clone>`. If you installed it through the marketplace, run `claude plugin update usage-board@tomas-plugins` after making changes.
+To load your working copy in a session, run `claude --plugin-dir <path to the clone>`. If you installed it through the marketplace, run `claude plugin update claudify@tomas-plugins` after making changes.

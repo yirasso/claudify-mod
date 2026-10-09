@@ -1,4 +1,4 @@
-# Claudify: the usage-board plugin
+# Claudify plugin
 
 A Claude Code plugin (a "mod": function hooks, no MCP server) that shows a pane with:
 
@@ -11,8 +11,8 @@ The owner is Tomás. He talks in European Portuguese (never Brazilian); the plug
 
 ## Install and reload
 
-- **Installed for Tomás from GitHub** as `usage-board@tomas-plugins`: the marketplace `tomas-plugins` is `yirasso/claudify` (`.claude-plugin/marketplace.json`, with the plugin at `source: "./"`). Claude Code runs a copy in `~/.claude/plugins/cache/tomas-plugins/usage-board/<version>/`, not this folder.
-  - **To ship a change:** bump `version` in `.claude-plugin/plugin.json`, commit, push to `main`, then `claude plugin update usage-board@tomas-plugins` and `/reload-plugins`.
+- **Installed for Tomás from GitHub** as `claudify@tomas-plugins`: the marketplace `tomas-plugins` is `yirasso/claudify` (`.claude-plugin/marketplace.json`, with the plugin at `source: "./"`). Claude Code runs a copy in `~/.claude/plugins/cache/tomas-plugins/claudify/<version>/`, not this folder.
+  - **To ship a change:** bump `version` in `.claude-plugin/plugin.json`, commit, push to `main`, then `claude plugin update claudify@tomas-plugins` and `/reload-plugins`.
   - **To try edits before pushing:** `claude --plugin-dir C:\Dev\Claudify`.
 - **The `claude` CLI is not on PATH.** The binary is `%APPDATA%\Claude\claude-code\<version>\<hash>\claude.exe` (it was `2.1.293\83cb0bd7fed4` on 9 Oct 2026).
 - **Before finishing a change**, all three must pass:

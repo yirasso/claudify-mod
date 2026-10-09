@@ -3,10 +3,10 @@ import { expect, test } from 'claude-code/testing'
 const SURFACES = ['terminal', 'desktop'] as const
 
 const pane = (surface: (typeof SURFACES)[number]) => ({
-  plugin: 'usage-board',
+  plugin: 'claudify',
   surface,
   component: 'Pane' as const,
-  requestId: 'usage-board',
+  requestId: 'claudify',
   props: { title: 'Claude', isFocused: false } as never,
   viewport: { columns: 60, rows: 40 } as never,
 })
@@ -50,7 +50,7 @@ test('the band above the prompt shows and hides the pane', async ($, on) => {
   const calls: string[] = []
   on('ui.open', async () => (calls.push('open'), { value: { isPlaced: true } }) as never)
   on('ui.close', async () => (calls.push('close'), { value: undefined }) as never)
-  const band = await $.ui.mount({ plugin: 'usage-board', surface: 'desktop', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false } as never })
+  const band = await $.ui.mount({ plugin: 'claudify', surface: 'desktop', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false } as never })
   expect((await band.find({ key: 'band:toggle' }))?.text).toContain('Show Claude panel')
   await band.press({ key: 'band:toggle' })
   expect(calls).toEqual(['open'])
@@ -73,7 +73,7 @@ test('/claudify opens the pane, and closes it when it is already open', async ($
   on('fs.list', async () => ({ value: [] }) as never)
   on('process.run', async () => ({ value: { exitCode: 1, stdout: '', stderr: '' } }) as never)
   // The host lists the pane while it is open.
-  on('ui.panes', async () => ({ value: calls.at(-1) === 'open' ? [{ id: 'usage-board', title: 'Claude', isShown: true, isFocused: false, isPlaced: true }] : [] }) as never)
+  on('ui.panes', async () => ({ value: calls.at(-1) === 'open' ? [{ id: 'claudify', title: 'Claude', isShown: true, isFocused: false, isPlaced: true }] : [] }) as never)
   const run = () => $.command.run({ command: 'claudify', args: '', origin: { kind: 'user' } } as never) as Promise<{ text?: string }>
   expect((await run()).text).toContain('Opened')
   expect((await run()).text).toContain('Closed')

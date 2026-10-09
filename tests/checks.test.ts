@@ -22,10 +22,10 @@ for (const [graph, remote] of [
 
     await $.command.run({ command: 'claudify', args: '', origin: { kind: 'user' } } as never)
     const ui = await $.ui.mount({
-      plugin: 'usage-board',
+      plugin: 'claudify',
       surface: 'terminal',
       component: 'Pane',
-      requestId: 'usage-board',
+      requestId: 'claudify',
       props: { title: 'Claude', isFocused: false } as never,
       viewport: { columns: 80, rows: 60 } as never,
     })
