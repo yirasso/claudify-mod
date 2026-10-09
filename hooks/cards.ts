@@ -20,8 +20,6 @@ const YELLOW = '#f6ff00'
 export type Ring = { label: string; percent: number | null; icon: 'clock' | 'calendar' | 'spark' }
 export type Badge = { name: string; ok: boolean; mark: 'graph' | 'github' | 'ponytail' | 'npm' | 'claude' }
 export type Dashboard = {
-  /** Whether the project's script is running (the first button is then a stop button). */
-  running: boolean
   /** The usage ring gauges: the session, the week and the spend limit, when the plan has them. */
   rings: Ring[]
   /** The pill in the usage tile's corner (when the session window resets). */
@@ -49,68 +47,6 @@ const tile = (x: number, y: number, w: number, h: number, r: number, fill = TILE
 /** A small uppercase caption. */
 const cap = (x: number, y: number, text: string, fill = MUTED): string =>
   `<text x="${x}" y="${y}" font-family="${SANS}" font-size="11" letter-spacing=".6" fill="${fill}">${esc(text.toUpperCase())}</text>`
-
-/**
- * The actions tile: a dotted field with the mark in a black disc and four square buttons below it, drawn here
- * without their labels (an SVG cannot be pressed): the pane lays real Buttons over the labels' row, 150px down
- * (8 rows of 18px), centred on the four columns.
- */
-const ACTION_ICONS: Record<'start' | 'stop' | 'save' | 'setup' | 'compact', string> = {
-  compact: '<path d="M12 3v6M9 6l3 3 3-3M12 21v-6M9 18l3-3 3 3M4 12h16"/>',
-  start: '<rect x="3.5" y="3.5" width="17" height="17" rx="5"/><path d="M10 8.6l5.2 3.4-5.2 3.4z"/>',
-  stop: '<rect x="3.5" y="3.5" width="17" height="17" rx="5"/><rect x="9" y="9" width="6" height="6" rx="1"/>',
-  save: '<path d="M5 5.5A1.5 1.5 0 016.5 4h9.2L19 7.3v10.2a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 015 17.5z"/><path d="M8.5 4v4.5h6V4M8.5 19v-5h7v5"/>',
-  setup: '<path d="M4 7h8M18 7h2M4 12h2M12 12h8M4 17h8M18 17h2"/><circle cx="15" cy="7" r="2.2"/><circle cx="9" cy="12" r="2.2"/><circle cx="15" cy="17" r="2.2"/>',
-}
-function actions(w: number, h: number, running: boolean): string {
-  const dots: string[] = []
-  for (let row = 0; row < 4; row++) {
-    for (let x = 18 + 0.8; x < w - 18; x += 15.6) {
-      if (Math.abs(x - w / 2) < 38) continue
-      dots.push(`<circle cx="${x.toFixed(1)}" cy="${24 + row * 16}" r="1" fill="#7a7a7a"/>`)
-    }
-  }
-  return `${tile(0, 0, w, h, 28)}
-${dots.join('')}
-<circle cx="${w / 2}" cy="44" r="20" fill="#000"/>
-<g transform="translate(${w / 2 - 12} 32)"><path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6L5.6 18.4" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></g>
-${actionSquares(w, 88, 50, running)}`
-}
-
-/** The four square buttons, centred on four equal columns, `size` px wide, their tops at `y`. */
-function actionSquares(w: number, y: number, size: number, running: boolean): string {
-  return ([running ? 'stop' : 'start', 'save', 'setup', 'compact'] as const)
-    .map((k, i) => {
-      const cx = (w / 8) * (1 + 2 * i)
-      const icon = size * 0.46
-      return `<rect x="${(cx - size / 2).toFixed(1)}" y="${y}" width="${size}" height="${size}" rx="${Math.round(size * 0.28)}" fill="#3a3a3a"/>
-${iconG(ACTION_ICONS[k], cx - icon / 2, y + (size - icon) / 2, icon, '#ececec')}`
-    })
-    .join('\n')
-}
-
-/**
- * The actions tile as a slim band for above the prompt: the same dotted tile and squares without the mark,
- * 84px tall. Its labels sit 3 rows down (54px), where the band lays the real Buttons.
- */
-export function actionsBar(running: boolean): string {
-  const W = 480
-  const H = 84
-  const dots: string[] = []
-  for (let row = 0; row < 3; row++) {
-    for (let x = 18 + 0.8; x < W - 18; x += 15.6) {
-      const cy = 14 + row * 16
-      // Not behind a square (their columns are 120px wide, the squares 44px); the labels' row stays clear.
-      if ([1, 3, 5, 7].some(k => Math.abs(x - (W / 8) * k) < 30)) continue
-      dots.push(`<circle cx="${x.toFixed(1)}" cy="${cy}" r="1" fill="#7a7a7a"/>`)
-    }
-  }
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">
-${tile(0, 0, W, H, 28)}
-${dots.join('')}
-${actionSquares(W, 8, 44, running)}
-</svg>`
-}
 
 /** The ring gauges' icons, on a 24 grid. */
 const ICONS: Record<Ring['icon'], string> = {
@@ -239,24 +175,22 @@ ${cap(72, h / 2 - 8, 'Context')}
 </g>`
 }
 
-/** The whole dashboard: the actions tile, the usage rings, then the project hero beside the repository and context tiles. */
+/** The whole dashboard: the usage rings, then the project hero beside the repository and context tiles. */
 export function dashboard(d: Dashboard): string {
   const W = 480
   const gap = 8
-  const headH = 186
   const usageH = 188
   const rowH = 236
   const half = (W - gap) / 2
   const repoH = 148
   const pillH = rowH - repoH - gap
-  const y1 = headH + gap
+  const y1 = 0
   const y2 = y1 + usageH + gap
   const H = y2 + rowH
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">
 <defs>
 <radialGradient id="heroGlow" cx=".5" cy=".35" r=".6"><stop offset="0" stop-color="#fff" stop-opacity=".22"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
 </defs>
-${actions(W, headH, d.running)}
 ${usage(d, y1, W, usageH)}
 ${project(d, 0, y2, half, rowH)}
 ${repo(d, half + gap, y2, half, repoH)}
