@@ -414,7 +414,7 @@ function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns:
     <Button key="project:setup" variant="secondary" label="⚙ Setup Project" onPress={() => void setupProject($)} />
   )
   // Update Graph is there while commits newer than the graph wait to go into it.
-  const graphButton = proj.graphStale && !job && (
+  const graphButton = proj.graphStale && (!job || job.isError) && (
     <Button key="graphify:update" variant="secondary" label="↻ Update Graph" onPress={() => void updateGraph($, proj.graphify)} />
   )
   // The checks: a filled green dot when it is on, a hollow dim one when it is not, a yellow one when out of date.
@@ -521,6 +521,8 @@ export const register: Register = on => {
       const stopped: ScriptRun = { ...run, status: 'exited', code: null, tail: [...run.tail, 'Stopped when the mod reloaded.'].slice(-TAIL) }
       await update($, runs, all => ({ ...all, [name]: stopped }))
     }
+    // Nothing of the graph runs across a reload: a line left from before (a failure) goes.
+    await update($, graphJob, () => null)
     await readProject($)
     const usage = await $.session.usage().catch(() => null)
     if (usage) await setLimits($, usage.rateLimits)

@@ -15,7 +15,7 @@ The owner is Tomás. He talks in European Portuguese (never Brazilian); the plug
 - **Every change ships.** After each change (the three checks below passing): bump `version`, commit, push to `main`, `claude plugin update claudify@tomas-plugins` and `/reload-plugins`, so Tomás sees it in Claude straight away. No separate HTML mock-up: the UI is designed directly in `hooks/register.tsx`.
 - **Before finishing a change**, all three must pass:
   - `claude plugin validate .`
-  - `claude plugin test .` (13 tests, 4 files)
+  - `claude plugin test .` (14 tests, 4 files)
   - the typecheck: `npx -y -p typescript tsc -p tsconfig.json` (TypeScript is not installed in the repo, so plain `npx tsc` fails), against the API types in `.claude-plugin/types/`. That folder is generated and git-ignored; the plugin-authoring skill regenerates it.
 - **For the API, load the `plugin-authoring` skill** before touching the hooks: it has the full contract.
 
@@ -39,6 +39,7 @@ The owner is Tomás. He talks in European Portuguese (never Brazilian); the plug
 - **`$.ui.resolve(e)`** gives the elements per surface: Box/Text/Button everywhere, Svg on desktop only.
 - **The graphify check** uses `$.session.cwd()` plus `graphify-out/graph.json`. `fs.list('.')` failed.
 - **A plugin can't spawn an Agent under auto mode**: the classifier refuses it ("the request that produced this action did not ask for one"). Call the model with `$.model.complete` instead.
+- **`$.state` outlives `/reload-plugins`**: a line left from a failed run stays; `session.start` clears `graphJob`.
 - **`$.fs.write`/`read` with a relative path** resolve against the process, not the session folder: build paths from `$.session.cwd()`.
 - **`graphify update .`** (code only) re-reads `README.md` as code and drops its semantic nodes; the next docs pass brings them back.
 - **Stopping a script** on Windows: `taskkill /T /F` exits with code 1. Show «stopped», not a failure.

@@ -103,3 +103,26 @@ for (const stale of [true, false]) {
     expect(spawned).toBe(0)
   })
 }
+
+test('graphify: a failed update shows its line and keeps Update Graph to try again', async ($, on) => {
+  on('fs.read', async () => ({ value: '{}' }))
+  on('fs.exists', async () => ({ value: false }))
+  on('settings.read', async () => ({ value: {} }) as never)
+  on('session.cwd', async () => ({ value: 'C:/Dev/Nau' }))
+  on('fs.list', async () => ({ value: [{ name: 'graph.json', kind: 'file', size: 2048, mtimeMs: 1_700_000_000_000, isLink: false }] }) as never)
+  on('process.run', async (_$: unknown, e: { argv: readonly string[] }) => {
+    const ok = (stdout = '') => ({ value: { exitCode: 0, stdout, stderr: '' } }) as never
+    if (e.argv[0] === 'graphify') return { value: { exitCode: 1, stdout: '', stderr: 'boom\n' } } as never
+    if (e.argv[1] === 'log') return ok('abc123\n')
+    if (e.argv.join(' ') === 'git rev-parse --is-inside-work-tree') return ok('true\n')
+    return { value: { exitCode: 1, stdout: '', stderr: '' } } as never
+  })
+  on('session.usage', async () => ({ value: { startedAt: 0, context: {}, rateLimits: [] } }) as never)
+  on('session.start', async () => ({ cwd: 'C:/Dev/Nau' }) as never)
+
+  await $.session.start({ cwd: 'C:/Dev/Nau', surface: 'desktop', isInteractive: true } as never)
+  const ui = await $.ui.mount({ plugin: 'claudify', surface: 'desktop', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false } as never })
+  await ui.press({ key: 'graphify:update' })
+  expect((await ui.findAll({ type: 'Text' })).map(t => t.text).join('\n')).toContain('graphify update failed: boom')
+  expect(await ui.find({ key: 'graphify:update' })).toBeTruthy()
+})
