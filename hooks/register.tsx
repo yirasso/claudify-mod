@@ -98,6 +98,19 @@ const DOC_FILE = /\.(md|mdx|txt|rst)$/i
 const DOC_BATCH_CHARS = 80_000
 const DOC_CHARS = 40_000
 
+/**
+ * Of the files commits after `since` touched, those changed after it on disk (or deleted): a commit that only
+ * records files the graph already read (the first commit after Setup Project builds the graph) changes nothing.
+ */
+async function touchedSince($: EngineInterface, cwd: string, since: number, files: string[]): Promise<string[]> {
+  const touched: string[] = []
+  for (const file of files.slice(0, 200)) {
+    const stat = await $.fs.stat(`${cwd}/${file}`).catch(() => null)
+    if (!stat || stat.mtimeMs > since + 1000) touched.push(file)
+  }
+  return touched
+}
+
 /** Where docs left out of the graph start (a time in ms; empty when none wait), so the dot stays yellow for them. */
 const DOCS_SINCE = 'graphify-out/.claudify_docs_since'
 
@@ -120,7 +133,8 @@ async function updateGraph($: EngineInterface, opts: { docs?: boolean; code?: bo
     if (since === null) await installGraphHook($)
   }
   const listed = since === null ? await sh($, ['git', 'ls-files']) : await sh($, ['git', 'log', `--since=@${Math.floor(since / 1000)}`, '--name-only', '--format='])
-  const docs = [...new Set(listed.stdout.split('\n').map(f => f.trim()))].filter(f => DOC_FILE.test(f) && !f.startsWith('graphify-out/'))
+  const listedDocs = [...new Set(listed.stdout.split('\n').map(f => f.trim()))].filter(f => DOC_FILE.test(f) && !f.startsWith('graphify-out/'))
+  const docs = since === null ? listedDocs : await touchedSince($, cwd, since, listedDocs)
   if (docs.length && withDocs && !(await addDocs($, docs))) return
   await $.fs.write(`${cwd}/${DOCS_SINCE}`, docs.length && !withDocs ? String(since ?? Date.now()) : '').catch(() => undefined)
   await update($, graphJob, () => null)
@@ -390,7 +404,8 @@ async function readProject($: EngineInterface): Promise<void> {
   // The graph is out of date once a commit after it touched more than the graph and .gitignore.
   // shortcut: a commit made right after building the graph counts too, until a file-level check is worth it.
   // Docs the code-only refresh left out keep it out of date too.
-  const codeStale = graphify !== null && isRepo && (await git('log', `--since=@${Math.floor(graphify / 1000)}`, '--format=%H', '--', '.', ':(exclude)graphify-out', ':(exclude).gitignore')) !== ''
+  const committed = graphify !== null && isRepo ? (await git('log', `--since=@${Math.floor(graphify / 1000)}`, '--name-only', '--format=', '--', '.', ':(exclude)graphify-out', ':(exclude).gitignore')).split('\n').map(f => f.trim()).filter(Boolean) : []
+  const codeStale = graphify !== null && committed.length > 0 && (await touchedSince($, cwd, graphify, [...new Set(committed)])).length > 0
   const docsWaiting = graphify !== null && Number((await $.fs.read(`${cwd}/${DOCS_SINCE}`).catch(() => '')).trim()) > 0
   const graphStale = codeStale || docsWaiting
   await update($, project, () => ({ start, install, build, graphify, graphStale, github: repo, branch, ponytail, git: isRepo, pending, behind, changed, lastCommit }))
@@ -796,7 +811,10 @@ async function runGithub($: EngineInterface): Promise<void> {
 /** The code part of the graph follows a push or a pull by itself (no model); changed docs wait for the button. */
 async function refreshCodeGraph($: EngineInterface): Promise<void> {
   await readProject($)
-  if ((await read($, project)).graphify !== null) await updateGraph($, { docs: false })
+  if ((await read($, project)).graphify === null) return
+  await updateGraph($, { docs: false })
+  // A repo Setup Project just made gets graphify's commit hook now (the graph was built before the repo was).
+  await installGraphHook($)
 }
 
 /** Undo for the last Save Changes: it was pushed, so a revert commit undoes it, pushed in turn. */

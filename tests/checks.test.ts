@@ -81,8 +81,9 @@ for (const stale of [true, false]) {
       const ok = (stdout = '') => ({ value: { exitCode: 0, stdout, stderr: '' } }) as never
       ran.push(e.argv.join(' '))
       if (e.argv[0] === 'graphify') return ok()
-      if (e.argv[1] === 'log' && e.argv.includes('--name-only')) return ok('hooks/register.tsx\n')
-      if (e.argv[1] === 'log') return (since = e.argv[2] ?? ''), ok(stale ? 'abc123\n' : '')
+      // The files commits after the graph touched (none on disk here: they count as changed since).
+      if (e.argv[1] === 'log' && e.argv.includes('--name-only')) return (since ||= e.argv[2] ?? ''), ok(stale ? 'hooks/register.tsx\n' : '')
+      if (e.argv[1] === 'log') return ok('')
       if (e.argv.join(' ') === 'git rev-parse --is-inside-work-tree') return ok('true\n')
       return { value: { exitCode: 1, stdout: '', stderr: '' } } as never
     })
@@ -183,4 +184,28 @@ test('graphify follows the work: code a turn changed goes in with no model; a co
   await turn()
   expect(asked.some(p => p.includes('C:/Dev/Nau/README.md'))).toBe(true)
   expect(ran.some(c => c.includes('graph_docs.py'))).toBe(true)
+})
+
+test('a commit that only records files the graph already read leaves the graph current (Setup Project)', async ($, on) => {
+  const graphAt = 1_700_000_000_000
+  on('fs.read', async () => ({ deny: 'ENOENT' }) as never)
+  on('fs.exists', async () => ({ value: false }))
+  // Every file was last written before the graph was built.
+  on('fs.stat', async () => ({ value: { kind: 'file', size: 10, mtimeMs: graphAt - 60_000, isLink: false } }) as never)
+  on('settings.read', async () => ({ value: {} }) as never)
+  on('session.cwd', async () => ({ value: 'C:/Dev/Nau' }))
+  on('fs.list', async () => ({ value: [{ name: 'graph.json', kind: 'file', size: 2048, mtimeMs: graphAt, isLink: false }] }) as never)
+  on('process.run', async (_$: unknown, e: { argv: readonly string[] }) => {
+    const ok = (stdout = '') => ({ value: { exitCode: 0, stdout, stderr: '' } }) as never
+    if (e.argv.join(' ') === 'git rev-parse --is-inside-work-tree') return ok('true\n')
+    // The first commit, made after the graph: it records the same files.
+    if (e.argv[1] === 'log' && e.argv.includes('--name-only')) return ok('README.md\nserver.js\npackage.json\n')
+    return ok('')
+  })
+  on('session.usage', async () => ({ value: { startedAt: 0, context: {}, rateLimits: [] } }) as never)
+  on('session.start', async () => ({ cwd: 'C:/Dev/Nau' }) as never)
+
+  await $.session.start({ cwd: 'C:/Dev/Nau', surface: 'desktop', isInteractive: true } as never)
+  const ui = await $.ui.mount({ plugin: 'claudify', surface: 'desktop', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false } as never })
+  expect(await ui.find({ key: 'graphify:update' })).toBeUndefined()
 })
