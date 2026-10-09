@@ -15,7 +15,7 @@ The owner is Tomás. He talks in European Portuguese (never Brazilian); the plug
 - **Every change ships.** After each change (the three checks below passing): bump `version`, commit, push to `main`, `claude plugin update claudify@tomas-plugins` and `/reload-plugins`, so Tomás sees it in Claude straight away. No separate HTML mock-up: the UI is designed directly in `hooks/register.tsx`.
 - **Before finishing a change**, all three must pass:
   - `claude plugin validate .`
-  - `claude plugin test .` (25 tests, 5 files)
+  - `claude plugin test .` (27 tests, 5 files)
   - the typecheck: `npx -y -p typescript tsc -p tsconfig.json` (TypeScript is not installed in the repo, so plain `npx tsc` fails), against the API types in `.claude-plugin/types/`. That folder is generated and git-ignored; the plugin-authoring skill regenerates it.
 - **For the API, load the `plugin-authoring` skill** before touching the hooks: it has the full contract.
 
@@ -31,6 +31,10 @@ The owner is Tomás. He talks in European Portuguese (never Brazilian); the plug
 - `scripts/graph_docs.py`: merges Sonnet's doc chunks into the graph, run with graphify's Python.
 - `tests/`: `actions`, `checks`, `github`, `scripts`, `start`.
 
+## Behaviour
+
+- **Finished work folds back after 2 s** (`collapseSoon`): the GitHub flow's lines, a graph failure, and runs that ended. A failed run with a button (Send error, Free port) stays.
+
 ## Rules learned the hard way
 
 **Validator and API**
@@ -43,7 +47,7 @@ The owner is Tomás. He talks in European Portuguese (never Brazilian); the plug
 - **`$.state` outlives `/reload-plugins`**: a line left from a failed run stays; `session.start` clears `graphJob`.
 - **`$.fs.write`/`read` with a relative path** resolve against the process, not the session folder: build paths from `$.session.cwd()`.
 - **`graphify update .`** (code only) re-reads `README.md` as code and drops its semantic nodes; the next docs pass brings them back.
-- **`graphify hook install`** adds post-commit/post-checkout hooks (code only, background rebuild) and a merge driver line in `.gitattributes`.
+- **`graphify hook install`** adds post-commit/post-checkout hooks (code only, background rebuild) and a merge driver line in `.gitattributes`; `keepGraphAttributesLocal` moves that line to `.git/info/attributes`.
 - **Freeing a port** on Windows: `netstat -ano` (not `-p tcp`, which hides the IPv6 rows Node listens on).
 - **Stopping a script** on Windows: `taskkill /T /F` exits with code 1. Show «stopped», not a failure.
 - **TS literal widening** in `update(...)`: type the records (`ScriptRun`, `GithubFlow`).

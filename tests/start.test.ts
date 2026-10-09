@@ -1,4 +1,4 @@
-import { expect, test } from 'claude-code/testing'
+import { expect, mock, test } from 'claude-code/testing'
 
 /** Lets a running script's loop and a button's handler move on (all in-process, a few turns of the queue). */
 const nap = async (): Promise<void> => {
@@ -183,3 +183,70 @@ test('a run that fails gets Send error to Claude, which sends its command, code 
   expect(sent).toContain('SyntaxError: Unexpected token in src/main.ts:3')
   expect(sent).not.toContain('__PID__')
 })
+
+test('two seconds after a pull, the GitHub lines fold back', async ($, on) => {
+  on('fs.read', async () => ({ deny: 'ENOENT' }) as never)
+  on('fs.write', async () => ({ value: undefined }) as never)
+  on('fs.exists', async () => ({ value: false }))
+  on('settings.read', async () => ({ value: {} }) as never)
+  on('session.cwd', async () => ({ value: 'C:/Dev/Nau' }))
+  on('fs.list', async () => ({ value: [] }) as never)
+  let pulled = false
+  on('process.run', async (_$: unknown, e: { argv: readonly string[] }) => {
+    const cmd = e.argv.join(' ')
+    const ok = (stdout = '') => ({ value: { exitCode: 0, stdout, stderr: '' } }) as never
+    if (cmd === 'git rev-parse --is-inside-work-tree') return ok('true\n')
+    if (cmd === 'git remote get-url origin') return ok('https://github.com/yirasso/nau.git\n')
+    if (cmd === 'git rev-parse --abbrev-ref @{u}') return ok('origin/main\n')
+    if (cmd === 'git rev-list --count HEAD..@{u}') return ok(pulled ? '0\n' : '1\n')
+    if (cmd === 'git pull --ff-only') return (pulled = true), ok('Fast-forward\n')
+    return ok('')
+  })
+  on('session.usage', async () => ({ value: { startedAt: 0, context: {}, rateLimits: [] } }) as never)
+  const clock = mock.clock(on)
+  on('session.start', async () => ({ cwd: 'C:/Dev/Nau' }) as never)
+
+  await $.session.start({ cwd: 'C:/Dev/Nau', surface: 'desktop', isInteractive: true } as never)
+  const ui = await $.ui.mount({ plugin: 'claudify', surface: 'desktop', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false } as never })
+  await ui.press({ key: 'github:pull' })
+  const shown = async () => (await ui.findAll({ type: 'Text' })).map(t => t.text).join('\n')
+  expect(await shown()).toContain('Fast-forward')
+  await clock.advance(1000)
+  expect(await shown()).toContain('Fast-forward')
+  await clock.advance(1000)
+  expect(await shown()).not.toContain('Fast-forward')
+})
+
+test("graphify's merge driver line moves from a committed .gitattributes to .git/info/attributes", async ($, on) => {
+  const files: Record<string, string> = { 'C:/Dev/Nau/.gitattributes': 'graphify-out/graph.json merge=graphify\n' }
+  const key = (path: string) => path.replace(/\\/g, '/')
+  on('fs.read', async (_$: unknown, e: { path: string }) => (key(e.path) in files ? { value: files[key(e.path)] } : { deny: 'ENOENT' }) as never)
+  on('fs.write', async (_$: unknown, e: { path: string; text: string }) => ((files[key(e.path)] = e.text), { value: undefined }) as never)
+  on('fs.exists', async () => ({ value: false }))
+  on('settings.read', async () => ({ value: {} }) as never)
+  on('session.cwd', async () => ({ value: 'C:/Dev/Nau' }))
+  on('fs.list', async () => ({ value: [{ name: 'graph.json', kind: 'file', size: 2048, mtimeMs: Date.now(), isLink: false }] }) as never)
+  const ran: string[] = []
+  on('process.run', async (_$: unknown, e: { argv: readonly string[] }) => {
+    const cmd = e.argv.join(' ')
+    ran.push(cmd)
+    const ok = (stdout = '') => ({ value: { exitCode: 0, stdout, stderr: '' } }) as never
+    if (cmd === 'git rev-parse --is-inside-work-tree') return ok('true\n')
+    if (cmd === 'graphify hook status') return ok('post-commit: installed\n')
+    if (cmd === 'git rev-parse --git-path info/attributes') return ok('.git/info/attributes\n')
+    return ok('')
+  })
+  on('session.usage', async () => ({ value: { startedAt: 0, context: {}, rateLimits: [] } }) as never)
+  on('session.start', async () => ({ cwd: 'C:/Dev/Nau' }) as never)
+
+  await $.session.start({ cwd: 'C:/Dev/Nau', surface: 'desktop', isInteractive: true } as never)
+  for (let i = 0; i < 20 && !ran.includes('git rm -q .gitattributes'); i++) await clockless()
+  expect(files['C:/Dev/Nau/.git/info/attributes']).toBe('graphify-out/graph.json merge=graphify\n')
+  expect(ran).toContain('git rm -q .gitattributes')
+})
+
+/** Lets background work move on without the clock. */
+async function clockless(): Promise<void> {
+  const later = (globalThis as unknown as { setTimeout: (f: () => void, ms: number) => void }).setTimeout
+  await new Promise<void>(r => later(r, 5))
+}

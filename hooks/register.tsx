@@ -184,9 +184,29 @@ async function graphifyPython($: EngineInterface, cwd: string): Promise<string> 
   return uvDir && (await $.fs.exists(uvPython)) ? uvPython : 'python'
 }
 
-/** The graph's line shows what went wrong. */
+/** The graph's line shows what went wrong (for two seconds, `collapseSoon`). */
 async function graphFailed($: EngineInterface, text: string): Promise<void> {
   await update($, graphJob, (): GraphJob => ({ text: text.slice(0, 200), isError: true }))
+  collapseSoon($)
+}
+
+/**
+ * Two seconds after something finished, the band folds back: the GitHub flow's lines (a push, a pull, an error),
+ * a graph failure and the runs that ended. A failed run stays while it has a button (Send error, Free port).
+ */
+function collapseSoon($: EngineInterface): void {
+  try {
+    $.clock.after(2000, () => void collapse($).catch(() => undefined))
+  } catch {
+    // No clock (tests): the lines stay.
+  }
+}
+
+async function collapse($: EngineInterface): Promise<void> {
+  if (['done', 'error'].includes((await read($, github)).phase)) await update($, github, (): GithubFlow => ({ phase: 'idle', plan: 'push', log: [] }))
+  if ((await read($, graphJob))?.isError) await update($, graphJob, () => null)
+  const ended = Object.entries(await read($, runs)).filter(([name, r]) => r.status === 'exited' && !(r.code !== 0 && r.code !== null && name !== 'install'))
+  if (ended.length) await update($, runs, all => Object.fromEntries(Object.entries(all).filter(([name]) => !ended.some(([n]) => n === name))))
 }
 
 const lastLine = (text: string): string => (text.trim().split('\n').pop() ?? '').slice(0, 160)
@@ -194,8 +214,30 @@ const lastLine = (text: string): string => (text.trim().split('\n').pop() ?? '')
 /** graphify's own git hooks: after each commit or checkout they rebuild the code graph (no model) in the background. */
 async function installGraphHook($: EngineInterface): Promise<void> {
   if (!(await read($, project)).git) return
-  if (/post-commit: installed/.test((await sh($, ['graphify', 'hook', 'status'])).stdout)) return
-  await sh($, ['graphify', 'hook', 'install'])
+  if (!/post-commit: installed/.test((await sh($, ['graphify', 'hook', 'status'])).stdout)) await sh($, ['graphify', 'hook', 'install'])
+  await keepGraphAttributesLocal($)
+}
+
+/**
+ * The hook's merge driver line goes in .gitattributes, which would go to GitHub; it moves to .git/info/attributes
+ * (this clone only), and a .gitattributes left with nothing else is removed (from git too, if it was committed).
+ */
+const MERGE_LINE = 'graphify-out/graph.json merge=graphify'
+async function keepGraphAttributesLocal($: EngineInterface): Promise<void> {
+  const cwd = await $.session.cwd()
+  const shared = await $.fs.read(`${cwd}/.gitattributes`).catch(() => null)
+  if (shared === null || !shared.split(/\r?\n/).some(l => l.trim() === MERGE_LINE)) return
+  const local = (await sh($, ['git', 'rev-parse', '--git-path', 'info/attributes'])).stdout.trim()
+  if (!local) return
+  const localPath = /^([A-Za-z]:)?[\\/]/.test(local) ? local : `${cwd}/${local}`
+  const had = await $.fs.read(localPath).catch(() => '')
+  if (!had.split(/\r?\n/).some(l => l.trim() === MERGE_LINE)) await $.fs.write(localPath, `${had}${had && !had.endsWith('\n') ? '\n' : ''}${MERGE_LINE}\n`)
+  const rest = shared.split(/\r?\n/).filter(l => l.trim() !== MERGE_LINE)
+  if (rest.some(l => l.trim())) return void (await $.fs.write(`${cwd}/.gitattributes`, rest.join('\n')))
+  const tracked = (await sh($, ['git', 'ls-files', '--error-unmatch', '.gitattributes'])).exitCode === 0
+  if (tracked) await sh($, ['git', 'rm', '-q', '.gitattributes'])
+  else if ((await $.env.get('OS')) === 'Windows_NT') await sh($, ['cmd', '/c', 'del', '/q', `${cwd}/.gitattributes`.replace(/\//g, '\\')])
+  else await sh($, ['rm', '-f', `${cwd}/.gitattributes`])
 }
 
 /** The commit the band last saw, and the working tree's code changes it last put in the graph (this load only). */
@@ -367,6 +409,7 @@ async function runScript($: EngineInterface, name: string, cmd: string): Promise
           const ended: ScriptRun = { ...(all[name] ?? { tail: [] }), status: 'exited', code: stopped ? null : code }
           return { ...all, [name]: ended }
         })
+        collapseSoon($)
         return
       }
       rest += piece.value.text.replace(ANSI, '')
@@ -475,6 +518,7 @@ async function prepareGithub($: EngineInterface, model = COMMIT_MODEL): Promise<
   const ahead = isRepo && onGithub ? Number((await sh($, ['git', 'rev-list', '--count', '@{u}..HEAD'])).stdout.trim()) || 0 : 0
   if (!files && plan === 'push' && !ahead) {
     await update($, github, (): GithubFlow => ({ phase: 'done', plan, log: ['Nothing to commit or push: the branch is up to date.'] }))
+    collapseSoon($)
     return
   }
 
@@ -491,6 +535,7 @@ async function prepareGithub($: EngineInterface, model = COMMIT_MODEL): Promise<
     message = reply.isAnswered ? reply.text.trim().replace(/^```\w*\n?|```$/g, '').trim() : ''
     if (!message) {
       await update($, github, (): GithubFlow => ({ phase: 'error', plan, log: [`The model did not write a message (${reply.isAnswered ? 'empty reply' : reply.reason}).`] }))
+      collapseSoon($)
       return
     }
   }
@@ -510,6 +555,7 @@ async function runGithub($: EngineInterface): Promise<void> {
     log.push(...out)
     if (r.exitCode !== 0) {
       await update($, github, (all): GithubFlow => ({ ...all, phase: 'error', log: [...log] }))
+      collapseSoon($)
       return false
     }
     await update($, github, (all): GithubFlow => ({ ...all, log: [...log] }))
@@ -531,6 +577,7 @@ async function runGithub($: EngineInterface): Promise<void> {
   }
   const url = (await sh($, ['gh', 'repo', 'view', '--json', 'url', '-q', '.url'])).stdout.trim()
   await update($, github, (all): GithubFlow => ({ ...all, phase: 'done', log: [...log], ...(url ? { url } : {}) }))
+  collapseSoon($)
   await refreshCodeGraph($)
 }
 
@@ -546,6 +593,7 @@ async function pullChanges($: EngineInterface): Promise<void> {
   const r = await sh($, ['git', 'pull', '--ff-only'])
   const log = ['> git pull --ff-only', ...`${r.stdout}\n${r.stderr}`.trim().split('\n').filter(Boolean).slice(-3)]
   await update($, github, (): GithubFlow => ({ phase: r.exitCode === 0 ? 'done' : 'error', plan: 'push', log }))
+  collapseSoon($)
   if (r.exitCode === 0) await refreshCodeGraph($)
   else await readProject($)
 }
