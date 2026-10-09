@@ -15,7 +15,6 @@ const weekStart = atom({ plugin: 'claudify', key: 'weekStart' } as const, null)
 const graphJob = atom({ plugin: 'claudify', key: 'graphJob' } as const, null)
 const notify = atom({ plugin: 'claudify', key: 'notify' } as const, true)
 const vscode = atom({ plugin: 'claudify', key: 'vscode' } as const, false)
-const menuOpen = atom({ plugin: 'claudify', key: 'menuOpen' } as const, false)
 
 // ——— The project: what Start Project runs, and the checks ———
 
@@ -700,7 +699,7 @@ function untilReset(ms: number): string {
  * off); on the right a dot for each check (GitHub, graphify, Ponytail) and the 5-hour and weekly limit
  * bars; then what the scripts and the GitHub flow report.
  */
-function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns: Record<string, ScriptRun>, gh: GithubFlow, usage: UsageLimit[], base: UsageLimit | null, job: GraphJob | null, notifyOn: boolean, hasVscode: boolean, menu: boolean) {
+function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns: Record<string, ScriptRun>, gh: GithubFlow, usage: UsageLimit[], base: UsageLimit | null, job: GraphJob | null, notifyOn: boolean, hasVscode: boolean) {
   const { Box, Button, Text } = ui
   // Start Project runs what this kind of project runs (startCommand).
   const start = proj.start
@@ -782,17 +781,14 @@ function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns:
             </Text>
           ))}
           {session !== null && <Text dimColor>{`Session +${Number(session.toFixed(1))}%`}</Text>}
-          <Button key="band:menu" variant="secondary" label={menu ? '×' : '⋯'} onPress={() => void update($, menuOpen, open => !open)} />
+          {/* The folder, VS Code and the sound, as icons at the row's end. */}
+          <Box flexDirection="row" gap={1}>
+            <Button key="project:folder" variant="secondary" label="📁" onPress={() => void openFolder($)} />
+            {hasVscode && <Button key="project:editor" variant="secondary" label="</>" onPress={() => void openEditor($)} />}
+            <Button key="notify:toggle" variant="secondary" label={notifyOn ? '🔔' : '🔕'} onPress={() => void toggleNotify($)} />
+          </Box>
         </Box>
       </Box>
-      {menu && (
-        // The ⋯ menu: the rarely used actions, out of the band's row; a choice closes it.
-        <Box flexDirection="row" gap={1} justifyContent="flex-end">
-          <Button key="project:folder" variant="secondary" label="📁 Open folder" onPress={() => void update($, menuOpen, () => false).then(() => openFolder($))} />
-          {hasVscode && <Button key="project:editor" variant="secondary" label="</> Open in VS Code" onPress={() => void update($, menuOpen, () => false).then(() => openEditor($))} />}
-          <Button key="notify:toggle" variant="secondary" label={notifyOn ? '🔔 Sound on' : '🔕 Sound off'} onPress={() => void toggleNotify($)} />
-        </Box>
-      )}
     {Object.entries(scriptRuns).map(([name, run]) => {
       const state = run.status === 'running' ? 'running' : run.status === 'stopping' ? 'stopping' : run.code === 0 ? 'finished' : run.code === null ? 'stopped' : `exited with code ${run.code}`
       return (
@@ -892,8 +888,7 @@ export const register: Register = on => {
     const job = await read($, graphJob)
     const notifyOn = await read($, notify)
     const hasVscode = await read($, vscode)
-    const menu = await read($, menuOpen)
-    return <Box flexDirection="column">{actionBar($, $.ui.resolve(e), proj, scriptRuns, gh, usage, base, job, notifyOn, hasVscode, menu)}</Box>
+    return <Box flexDirection="column">{actionBar($, $.ui.resolve(e), proj, scriptRuns, gh, usage, base, job, notifyOn, hasVscode)}</Box>
   })
 
   // The limit bars follow the windows as the engine measures them.
