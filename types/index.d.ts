@@ -69,7 +69,7 @@ declare module 'claude-code' {
       vscode: boolean
       /** The typecheck's last result, or null where the project has none. */
       types: TypeCheck | null
-      /** Whether Claudify is off for this project (/claudify off). */
+      /** Whether Claudify is off for this project (/claudify off; /claudify turns it on). */
       off: boolean
     }
   }

@@ -13,7 +13,7 @@ A Claude Code plugin that adds a band above the prompt with the project's action
 
 The pane with the session's skills, MCP servers, connectors and plugins lives in its own plugin, `setup-info`.
 
-To turn Claudify off in a project, type `/claudify off` (and `/claudify on` to bring it back).
+To turn Claudify off in a project, type `/claudify off`; `/claudify` brings it back.
 
 ## Install
 

@@ -565,7 +565,7 @@ async function sendTypes($: EngineInterface): Promise<void> {
   await $.prompt.submit({ text: `The typecheck fails with ${check.errors.length} error${check.errors.length === 1 ? '' : 's'}:\n\n${fence}\n${check.errors.join('\n')}\n${fence}\n\nFix them.` })
 }
 
-/** Whether Claudify is off for this project (`/claudify off`, kept in the store by folder). */
+/** Whether Claudify is off for this project (`/claudify off`; `/claudify` turns it on), kept in the store by folder. */
 async function offKey($: EngineInterface): Promise<string> {
   return `off:${(await $.session.cwd().catch(() => '')).replace(/\\/g, '/').toLowerCase()}`
 }
@@ -939,7 +939,7 @@ export const register: Register = on => {
     // The project's checks stay current: a new graph, a plugin enabled or a new remote shows within 10 s.
     const isOff = (await $.store.get(await offKey($)).catch(() => undefined)) === true
     await update($, off, () => isOff)
-    await $.command.register({ name: 'claudify', description: 'Turn Claudify off or on for this project: /claudify off, /claudify on' }).catch(() => undefined)
+    await $.command.register({ name: 'claudify', description: 'Turn Claudify on for this project, or off with /claudify off' }).catch(() => undefined)
     $.clock.every(10_000, () => void read($, off).then(o => (o ? undefined : readProject($).then(() => followCommits($)))).catch(() => undefined))
     if (!isOff && (await read($, project)).graphify !== null) void installGraphHook($).catch(() => undefined)
     // What GitHub has: now and every 5 minutes, for the Pull button.
@@ -964,16 +964,15 @@ export const register: Register = on => {
     return <Box flexDirection="column">{actionBar($, $.ui.resolve(e), proj, scriptRuns, gh, usage, base, job, notifyOn, hasVscode, check)}</Box>
   })
 
-  // /claudify off hides the band and stops its automatic work in this project; /claudify on brings them back.
+  // /claudify off hides the band and stops its automatic work in this project; /claudify brings them back.
   on('command.run', { command: 'claudify' }, async ($, e) => {
-    const arg = e.args.trim().toLowerCase()
-    if (arg !== 'off' && arg !== 'on') return { text: `Claudify is ${(await read($, off)) ? 'off' : 'on'} for this project. Use /claudify off or /claudify on.` }
-    const turnOff = arg === 'off'
+    // Two commands only: /claudify off, and /claudify (on).
+    const turnOff = e.args.trim().toLowerCase() === 'off'
     await update($, off, () => turnOff)
     if (turnOff) await $.store.set(await offKey($), true)
     else await $.store.delete(await offKey($)).catch(() => undefined)
     if (!turnOff) await readProject($)
-    return { text: turnOff ? 'Claudify is off for this project: no band, and nothing runs by itself. /claudify on brings it back.' : 'Claudify is on for this project.' }
+    return { text: turnOff ? 'Claudify is off for this project: no band, and nothing runs by itself. /claudify brings it back.' : 'Claudify is on for this project.' }
   })
 
   // The limit bars follow the windows as the engine measures them.

@@ -57,7 +57,7 @@ test('after a turn that changed code the typecheck runs; a failure shows a red T
   expect(ran.filter(c => c.includes('tsc')).length).toBe(runs)
 })
 
-test('/claudify off hides the band and stops the automatic work; /claudify on brings it back', async ($, on) => {
+test('/claudify off hides the band and stops the automatic work; /claudify brings it back', async ($, on) => {
   const stored: Record<string, unknown> = {}
   const ran: string[] = []
   on('fs.read', async () => ({ deny: 'ENOENT' }) as never)
@@ -91,7 +91,7 @@ test('/claudify off hides the band and stops the automatic work; /claudify on br
   await settle()
   expect(ran.slice(before).some(c => c.includes('tsc') || c.startsWith('graphify'))).toBe(false)
 
-  await $.command.run({ command: 'claudify', args: 'on' } as never)
+  await $.command.run({ command: 'claudify', args: '' } as never)
   expect(stored['off:c:/dev/nau']).toBeUndefined()
   expect((await ui.findAll({ type: 'Text' })).length > 0).toBe(true)
 })
