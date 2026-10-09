@@ -1,20 +1,25 @@
-/** A project script running (or that ran): its state, its tree's PID, its last lines and its address. */
+/** A start command running (or that ran): its state, the command, its tree's PID, its last lines, its address, and a port it found taken. */
 export type ScriptRun = {
   status: 'running' | 'stopping' | 'exited'
   code: number | null
+  cmd?: string
   pid?: string
   tail: string[]
   url?: string
+  busyPort?: number
 }
 
+/** What Start Project runs: a name for its run (`dev`, `cargo`, `python`…) and the command line. */
+export type StartCommand = { name: string; cmd: string }
+
 /**
- * The session's project: the scripts the pane can run (`dev`, `start`) and the package manager; when the
- * graphify graph was built (the graphify-out folder's date, or null without it) and whether commits since then make it
- * out of date; the GitHub repository of the
+ * The session's project: what Start Project runs (or null); when the graphify graph was built (graph.json's date,
+ * or null without it) and whether commits or docs left out since make it out of date; the GitHub repository of the
  * `origin` remote (`owner/repo`, or null) and the current branch; the enabled Ponytail plugin's id, or null;
- * whether there is something to send to GitHub (changed files, unpushed commits, or a repo not on GitHub yet).
+ * whether there is something to send to GitHub (changed files, unpushed commits, or a repo not on GitHub yet), and
+ * how many commits GitHub has that the branch does not (as of the last fetch).
  */
-export type ProjectScripts = { pm: string; names: string[]; graphify: number | null; graphStale: boolean; github: string | null; branch: string | null; ponytail: string | null; git: boolean; pending: boolean }
+export type ProjectScripts = { start: StartCommand | null; graphify: number | null; graphStale: boolean; github: string | null; branch: string | null; ponytail: string | null; git: boolean; pending: boolean; behind: number }
 
 /** A rate-limit window: `five_hour` or `seven_day`, how much of it is used (0 to 100) and when it resets. */
 export type UsageLimit = { kind: string; percentUsed: number; resetsAt?: string }

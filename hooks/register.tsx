@@ -5,28 +5,56 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { GithubFlow, GithubPlan, GraphJob, ProjectScripts, ScriptRun, UsageLimit } from '../types'
+import type { GithubFlow, GithubPlan, GraphJob, ProjectScripts, ScriptRun, StartCommand, UsageLimit } from '../types'
 
-const project = atom({ plugin: 'claudify', key: 'project' } as const, { pm: 'npm', names: [], graphify: null, graphStale: false, github: null, branch: null, ponytail: null, git: true, pending: false })
+const project = atom({ plugin: 'claudify', key: 'project' } as const, { start: null, graphify: null, graphStale: false, github: null, branch: null, ponytail: null, git: true, pending: false, behind: 0 })
 const runs = atom({ plugin: 'claudify', key: 'runs' } as const, {})
 const github = atom({ plugin: 'claudify', key: 'github' } as const, { phase: 'idle', plan: 'push', log: [] })
 const limits = atom({ plugin: 'claudify', key: 'limits' } as const, [])
 const weekStart = atom({ plugin: 'claudify', key: 'weekStart' } as const, null)
 const graphJob = atom({ plugin: 'claudify', key: 'graphJob' } as const, null)
 
-// ——— The project: the "dev" and "start" buttons and the checks ———
+// ——— The project: what Start Project runs, and the checks ———
 
-/** The scripts that get a button, in button order. */
-const SCRIPTS = ['dev', 'start'] as const
+/** The package.json scripts Start Project runs, the first one there wins. */
+const START_SCRIPTS = ['dev', 'start', 'serve', 'preview'] as const
 const TAIL = 6
+
+/**
+ * What Start Project runs in this folder: a package.json script (by its package manager's lockfile), Expo,
+ * Cargo, Go, a Python entry point (through uv when it has a uv.lock) or a Godot project; null for none.
+ */
+async function startCommand($: EngineInterface, cwd: string): Promise<StartCommand | null> {
+  const has = (file: string) => $.fs.exists(`${cwd}/${file}`).catch(() => false)
+  type Pkg = { scripts?: Record<string, unknown>; dependencies?: Record<string, unknown>; devDependencies?: Record<string, unknown> }
+  let pkg: Pkg | null = null
+  try {
+    pkg = JSON.parse(await $.fs.read(`${cwd}/package.json`)) as Pkg
+  } catch {
+    // No package.json.
+  }
+  if (pkg) {
+    let pm = 'npm'
+    if (await has('pnpm-lock.yaml')) pm = 'pnpm'
+    else if (await has('yarn.lock')) pm = 'yarn'
+    else if ((await has('bun.lockb')) || (await has('bun.lock'))) pm = 'bun'
+    const script = START_SCRIPTS.find(s => typeof pkg?.scripts?.[s] === 'string')
+    if (script) return { name: script, cmd: `${pm} run ${script}` }
+    if (pkg.dependencies?.expo || pkg.devDependencies?.expo) return { name: 'expo', cmd: 'npx expo start' }
+  }
+  if (await has('Cargo.toml')) return { name: 'cargo', cmd: 'cargo run' }
+  if (await has('go.mod')) return { name: 'go', cmd: 'go run .' }
+  const python = (await has('uv.lock')) ? 'uv run python' : 'python'
+  if (await has('manage.py')) return { name: 'django', cmd: `${python} manage.py runserver` }
+  for (const entry of ['main.py', 'app.py']) if (await has(entry)) return { name: 'python', cmd: `${python} ${entry}` }
+  // shortcut: Godot runs as `godot` from PATH; point it at the editor's exe when a project needs another.
+  if (await has('project.godot')) return { name: 'godot', cmd: 'godot --path .' }
+  return null
+}
 
 /** The terminal's colour codes, which the pane does not draw. */
 const ANSI = new RegExp(String.fromCharCode(27) + '\\[[0-9;?]*[A-Za-z]', 'g')
 
-/**
- * The session folder's project: the package.json scripts that get a button and the package manager (by its
- * lockfile), the graphify graph, and the GitHub repository of the `origin` remote.
- */
 /** The model for what setting up needs a model for: the first commit's message and the graph's docs. */
 const SETUP_MODEL = 'claude-sonnet-5-5'
 
@@ -37,7 +65,7 @@ const SETUP_MODEL = 'claude-sonnet-5-5'
 async function setupProject($: EngineInterface): Promise<void> {
   const p = await read($, project)
   if (!p.ponytail) await enablePonytail($)
-  if (p.graphify === null) await updateGraph($, null)
+  if (p.graphify === null) await updateGraph($)
   if (!p.github) await prepareGithub($, SETUP_MODEL)
   await readProject($)
 }
@@ -63,19 +91,28 @@ const DOC_FILE = /\.(md|mdx|txt|rst)$/i
 const DOC_BATCH_CHARS = 80_000
 const DOC_CHARS = 40_000
 
+/** Where docs left out of the graph start (a time in ms; empty when none wait), so the dot stays yellow for them. */
+const DOCS_SINCE = 'graphify-out/.claudify_docs_since'
+
 /**
- * Builds or updates the graph: `graphify update` reads the code with no model; only docs changed since
- * `since` (every doc, on a first build) go to Sonnet (`addDocs`).
+ * Builds or updates the graph: `graphify update` reads the code with no model. Docs changed since the graph (or
+ * since docs were last left out; every doc on a first build) go to Sonnet (`addDocs`), or with `withDocs` false
+ * wait for the button, the dot staying yellow.
  */
-async function updateGraph($: EngineInterface, since: number | null): Promise<void> {
+async function updateGraph($: EngineInterface, withDocs = true): Promise<void> {
+  const cwd = await $.session.cwd()
+  const { graphify } = await read($, project)
+  const waiting = Number((await $.fs.read(`${cwd}/${DOCS_SINCE}`).catch(() => '')).trim()) || null
+  const since = graphify === null ? null : (waiting ?? graphify)
   await update($, graphJob, (): GraphJob => ({ text: 'Updating the graph from the code…' }))
   if (since === null) await ignoreGraphOutput($)
   const built = await sh($, ['graphify', 'update', '.'], undefined, 600_000)
   if (built.exitCode !== 0) return graphFailed($, `graphify update failed: ${lastLine(built.stderr)}`)
   const listed = since === null ? await sh($, ['git', 'ls-files']) : await sh($, ['git', 'log', `--since=@${Math.floor(since / 1000)}`, '--name-only', '--format='])
   const docs = [...new Set(listed.stdout.split('\n').map(f => f.trim()))].filter(f => DOC_FILE.test(f) && !f.startsWith('graphify-out/'))
-  if (docs.length) await addDocs($, docs)
-  else await update($, graphJob, () => null)
+  if (docs.length && withDocs && !(await addDocs($, docs))) return
+  await $.fs.write(`${cwd}/${DOCS_SINCE}`, docs.length && !withDocs ? String(since ?? Date.now()) : '').catch(() => undefined)
+  await update($, graphJob, () => null)
   await readProject($)
 }
 
@@ -83,13 +120,13 @@ async function updateGraph($: EngineInterface, since: number | null): Promise<vo
  * The docs part, the only one that needs a model: Sonnet 5.5 (medium effort) reads the docs in batches with
  * the graphify skill's own extraction spec, and graph_docs.py merges what it wrote into the graph in code.
  */
-async function addDocs($: EngineInterface, docs: string[]): Promise<void> {
+async function addDocs($: EngineInterface, docs: string[]): Promise<boolean> {
   const cwd = await $.session.cwd()
   const specPath = `${(await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME')) ?? ''}/.claude/skills/graphify/references/extraction-spec.md`
   const specText = await $.fs.read(specPath).catch(() => '')
   // The subagent prompt is the spec's fenced block; the band sends the files' text instead of paths to read.
   const spec = /```\n([\s\S]*?)\n```/.exec(specText)?.[1]
-  if (!spec) return graphFailed($, `The graphify skill's extraction spec was not found (${specPath}).`)
+  if (!spec) return graphFailed($, `The graphify skill's extraction spec was not found (${specPath}).`).then(() => false)
 
   const texts: { path: string; text: string }[] = []
   for (const doc of docs) {
@@ -123,14 +160,14 @@ async function addDocs($: EngineInterface, docs: string[]): Promise<void> {
     } catch {
       parsed = null
     }
-    if (!parsed || !Array.isArray(parsed.nodes)) return graphFailed($, `Sonnet did not return the docs' graph (${reply.isAnswered ? 'no valid JSON' : reply.reason}).`)
+    if (!parsed || !Array.isArray(parsed.nodes)) return graphFailed($, `Sonnet did not return the docs' graph (${reply.isAnswered ? 'no valid JSON' : reply.reason}).`).then(() => false)
     await $.fs.write(`${cwd}/graphify-out/.graphify_chunk_${String(i + 1).padStart(2, '0')}.json`, JSON.stringify(parsed))
   }
 
   await update($, graphJob, (): GraphJob => ({ text: 'Merging the docs into the graph…' }))
   const merged = await sh($, [await graphifyPython($, cwd), `${$.plugin.root}/scripts/graph_docs.py`, cwd, specPath], undefined, 600_000)
-  if (merged.exitCode !== 0) return graphFailed($, `Merging the docs failed: ${lastLine(merged.stderr || merged.stdout)}`)
-  await update($, graphJob, () => null)
+  if (merged.exitCode !== 0) return graphFailed($, `Merging the docs failed: ${lastLine(merged.stderr || merged.stdout)}`).then(() => false)
+  return true
 }
 
 /** The Python graphify runs on: the one the skill saved, else uv's tool environment, else python. */
@@ -157,20 +194,14 @@ async function ignoreGraphOutput($: EngineInterface): Promise<void> {
   await $.fs.write(file, `${text}${text && !text.endsWith('\n') ? '\n' : ''}graphify-out/\n`)
 }
 
+/**
+ * The session folder's project: what Start Project runs, the graphify graph, the GitHub repository of the
+ * `origin` remote and how the branch stands against it, and whether Ponytail is on.
+ */
 async function readProject($: EngineInterface): Promise<void> {
-  let names: string[] = []
-  try {
-    const pkg = JSON.parse(await $.fs.read('package.json')) as { scripts?: Record<string, unknown> }
-    names = SCRIPTS.filter(s => typeof pkg.scripts?.[s] === 'string')
-  } catch {
-    // No package.json, no buttons.
-  }
-  let pm = 'npm'
-  if (await $.fs.exists('pnpm-lock.yaml')) pm = 'pnpm'
-  else if (await $.fs.exists('yarn.lock')) pm = 'yarn'
-  else if ((await $.fs.exists('bun.lockb')) || (await $.fs.exists('bun.lock'))) pm = 'bun'
   // graphify: graphify-out/graph.json in the session folder (its date says when the graph was built).
   const cwd = await $.session.cwd().catch(() => '.')
+  const start = await startCommand($, cwd)
   const outDir = `${cwd}/graphify-out`
   const graph = (await $.fs.list(outDir).catch(() => [])).find(x => x.name === 'graph.json' && x.kind === 'file')
   // GitHub: the origin remote points at a github.com repository.
@@ -184,12 +215,15 @@ async function readProject($: EngineInterface): Promise<void> {
   const branch = repo ? (await git('rev-parse', '--abbrev-ref', 'HEAD')) || null : null
   // Something to send to GitHub: a folder with no repo yet, a repo not on GitHub yet, changed files, or
   // commits the remote does not have (all of them, when the branch has no upstream).
+  // Behind: commits the remote has and the branch does not (as of the last fetch).
   let pending: boolean
+  let behind = 0
   if (!isRepo) pending = (await $.fs.list(cwd).catch(() => [])).some(x => !x.name.startsWith('.'))
   else if (!repo) pending = true
   else {
     const upstream = await git('rev-parse', '--abbrev-ref', '@{u}')
     const ahead = upstream ? Number(await git('rev-list', '--count', '@{u}..HEAD')) || 0 : (await git('rev-parse', 'HEAD')) ? 1 : 0
+    behind = upstream ? Number(await git('rev-list', '--count', 'HEAD..@{u}')) || 0 : 0
     pending = (await git('status', '--porcelain')) !== '' || ahead > 0
   }
   // Ponytail: the plugin enabled in the merged settings (user, project or local).
@@ -199,8 +233,11 @@ async function readProject($: EngineInterface): Promise<void> {
   const graphify = graph && graph.size > 0 ? graph.mtimeMs : null
   // The graph is out of date once a commit after it touched more than the graph and .gitignore.
   // shortcut: a commit made right after building the graph counts too, until a file-level check is worth it.
-  const graphStale = graphify !== null && isRepo && (await git('log', `--since=@${Math.floor(graphify / 1000)}`, '--format=%H', '--', '.', ':(exclude)graphify-out', ':(exclude).gitignore')) !== ''
-  await update($, project, () => ({ pm, names, graphify, graphStale, github: repo, branch, ponytail, git: isRepo, pending }))
+  // Docs the code-only refresh left out keep it out of date too.
+  const codeStale = graphify !== null && isRepo && (await git('log', `--since=@${Math.floor(graphify / 1000)}`, '--format=%H', '--', '.', ':(exclude)graphify-out', ':(exclude).gitignore')) !== ''
+  const docsWaiting = graphify !== null && Number((await $.fs.read(`${cwd}/${DOCS_SINCE}`).catch(() => '')).trim()) > 0
+  const graphStale = codeStale || docsWaiting
+  await update($, project, () => ({ start, graphify, graphStale, github: repo, branch, ponytail, git: isRepo, pending, behind }))
 }
 
 /** Keeps the rate-limit windows the band draws. */
@@ -217,15 +254,17 @@ async function killTree($: EngineInterface, pid: string): Promise<void> {
   else await $.process.run(['kill', '-TERM', pid]).catch(() => undefined)
 }
 
-/** Runs `<pm> run <script>` in the session folder, keeping its state, its last lines and its address. */
-async function runScript($: EngineInterface, name: string): Promise<void> {
-  const { pm } = await read($, project)
+/** A port another process holds, as the usual servers say it (Node, Vite with strictPort, Python). */
+const BUSY_PORT = /(?:EADDRINUSE[^\d]*|port\s+|address already in use[^\d]*)(\d{2,5})(?:\s+is\s+(?:already\s+)?in use)?/i
+
+/** Runs a start command in the session folder, keeping its state, its last lines, its address and a busy port. */
+async function runScript($: EngineInterface, name: string, cmd: string): Promise<void> {
   const windows = (await $.env.get('OS')) === 'Windows_NT'
   // A wrapper that prints its PID first, so "Stop" can end the whole tree.
   const argv = windows
-    ? ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', `Write-Output "__PID__=$PID"; ${pm} run ${name}; exit $LASTEXITCODE`]
-    : ['sh', '-c', `echo "__PID__=$$"; exec ${pm} run ${name}`]
-  const started: ScriptRun = { status: 'running', code: null, tail: [`> ${pm} run ${name}`] }
+    ? ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', `Write-Output "__PID__=$PID"; ${cmd}; exit $LASTEXITCODE`]
+    : ['sh', '-c', `echo "__PID__=$$"; exec ${cmd}`]
+  const started: ScriptRun = { status: 'running', code: null, cmd, tail: [`> ${cmd}`] }
   await update($, runs, all => ({ ...all, [name]: started }))
   const child = $.process.spawn({ argv })
   try {
@@ -249,15 +288,17 @@ async function runScript($: EngineInterface, name: string): Promise<void> {
       const pid = lines.map(l => /^__PID__=(\d+)/.exec(l)?.[1]).find(Boolean)
       const url = lines.map(l => /https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\]|0\.0\.0\.0)(?::\d+)?[^\s]*/.exec(l)?.[0]).find(Boolean)
       const shown = lines.filter(l => l.trim() && !l.startsWith('__PID__='))
+      // A busy port only matters if the run then fails (Vite moves to the next port and goes on).
+      const busy = shown.map(l => (/in use|EADDRINUSE/i.test(l) ? BUSY_PORT.exec(l)?.[1] : undefined)).find(Boolean)
       await update($, runs, all => {
-        const was: ScriptRun = all[name] ?? { status: 'running', code: null, tail: [] }
-        const now: ScriptRun = { ...was, ...(pid ? { pid } : {}), ...(url && !was.url ? { url } : {}), tail: [...was.tail, ...shown].slice(-TAIL) }
+        const was: ScriptRun = all[name] ?? { status: 'running', code: null, cmd, tail: [] }
+        const now: ScriptRun = { ...was, ...(pid ? { pid } : {}), ...(url && !was.url ? { url } : {}), ...(busy ? { busyPort: Number(busy) } : {}), tail: [...was.tail, ...shown].slice(-TAIL) }
         return { ...all, [name]: now }
       })
     }
   } catch (err) {
     await update($, runs, all => {
-      const failed: ScriptRun = { status: 'exited', code: null, tail: [...(all[name]?.tail ?? []), `Could not start: ${String(err)}`].slice(-TAIL) }
+      const failed: ScriptRun = { status: 'exited', code: null, cmd, tail: [...(all[name]?.tail ?? []), `Could not start: ${String(err)}`].slice(-TAIL) }
       return { ...all, [name]: failed }
     })
   }
@@ -270,6 +311,27 @@ async function stopScript($: EngineInterface, name: string): Promise<void> {
   const stopping: ScriptRun = { ...run, status: 'stopping' }
   await update($, runs, all => ({ ...all, [name]: stopping }))
   if (run.pid) await killTree($, run.pid)
+}
+
+/** Ends whatever listens on `port` (the process a failed start ran into), then starts the run again. */
+async function freePortAndStart($: EngineInterface, name: string, port: number): Promise<void> {
+  const run = (await read($, runs))[name]
+  if (!run?.cmd) return
+  if ((await $.env.get('OS')) === 'Windows_NT') {
+    // netstat's LISTENING rows end in the PID, IPv4 and IPv6 (Node listens on :::port): "TCP  0.0.0.0:3000  0.0.0.0:0  LISTENING  1234".
+    const rows = (await sh($, ['netstat', '-ano'])).stdout.split('\n')
+    const pids = new Set(rows.filter(r => /LISTENING/i.test(r) && new RegExp(`:${port}\\s`).test(r)).map(r => r.trim().split(/\s+/).pop() ?? '').filter(pid => /^\d+$/.test(pid) && pid !== '0' && pid !== '4'))
+    for (const pid of pids) await killTree($, pid)
+  } else {
+    for (const pid of (await sh($, ['lsof', '-ti', `tcp:${port}`, '-sTCP:LISTEN'])).stdout.split('\n').filter(Boolean)) await killTree($, pid.trim())
+  }
+  await runScript($, name, run.cmd)
+}
+
+/** Opens a dev server's address in the default browser. */
+async function openUrl($: EngineInterface, url: string): Promise<void> {
+  if ((await $.env.get('OS')) === 'Windows_NT') await sh($, ['rundll32', 'url.dll,FileProtocolHandler', url])
+  else if ((await sh($, ['open', url])).exitCode !== 0) await sh($, ['xdg-open', url])
 }
 
 // ——— The GitHub button: create the repo, publish it, or just commit and push ———
@@ -372,6 +434,29 @@ async function runGithub($: EngineInterface): Promise<void> {
   }
   const url = (await sh($, ['gh', 'repo', 'view', '--json', 'url', '-q', '.url'])).stdout.trim()
   await update($, github, (all): GithubFlow => ({ ...all, phase: 'done', log: [...log], ...(url ? { url } : {}) }))
+  await refreshCodeGraph($)
+}
+
+/** The code part of the graph follows a push or a pull by itself (no model); changed docs wait for the button. */
+async function refreshCodeGraph($: EngineInterface): Promise<void> {
+  await readProject($)
+  if ((await read($, project)).graphify !== null) await updateGraph($, false)
+}
+
+/** The Pull button: fast-forwards the branch to what GitHub has, reporting in the GitHub flow's lines. */
+async function pullChanges($: EngineInterface): Promise<void> {
+  await update($, github, (): GithubFlow => ({ phase: 'working', plan: 'push', log: ['> git pull --ff-only'] }))
+  const r = await sh($, ['git', 'pull', '--ff-only'])
+  const log = ['> git pull --ff-only', ...`${r.stdout}\n${r.stderr}`.trim().split('\n').filter(Boolean).slice(-3)]
+  await update($, github, (): GithubFlow => ({ phase: r.exitCode === 0 ? 'done' : 'error', plan: 'push', log }))
+  if (r.exitCode === 0) await refreshCodeGraph($)
+  else await readProject($)
+}
+
+/** Asks GitHub what it has (quietly), so the Pull button knows; then reads the project again. */
+async function fetchRemote($: EngineInterface): Promise<void> {
+  if (!(await read($, project)).github) return
+  await sh($, ['git', 'fetch', '--quiet'], undefined, 60_000)
   await readProject($)
 }
 
@@ -392,15 +477,15 @@ const BAR = 8
  */
 function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns: Record<string, ScriptRun>, gh: GithubFlow, usage: UsageLimit[], base: UsageLimit | null, job: GraphJob | null) {
   const { Box, Button, Text } = ui
-  // Start Project runs the dev script, or the start script when there is no dev.
-  const mainScript = proj.names.includes('dev') ? 'dev' : proj.names.includes('start') ? 'start' : (proj.names[0] ?? null)
-  const mainRun = mainScript ? scriptRuns[mainScript] : undefined
-  const startButton = mainScript ? (
+  // Start Project runs what this kind of project runs (startCommand).
+  const start = proj.start
+  const mainRun = start ? scriptRuns[start.name] : undefined
+  const startButton = start ? (
     <Button
-      key={`script:${mainScript}`}
+      key={`script:${start.name}`}
       variant={mainRun?.status === 'running' ? 'secondary' : 'primary'}
       label={mainRun?.status === 'stopping' ? '■ Stopping…' : mainRun?.status === 'running' ? '■ Stop Project' : '▶ Start Project'}
-      onPress={() => void (mainRun?.status === 'running' ? stopScript($, mainScript) : mainRun?.status === 'stopping' ? undefined : runScript($, mainScript))}
+      onPress={() => void (mainRun?.status === 'running' ? stopScript($, start.name) : mainRun?.status === 'stopping' ? undefined : runScript($, start.name, start.cmd))}
     />
   ) : (
     <Text dimColor>▶ Start Project</Text>
@@ -415,7 +500,11 @@ function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns:
   )
   // Update Graph is there while commits newer than the graph wait to go into it.
   const graphButton = proj.graphStale && (!job || job.isError) && (
-    <Button key="graphify:update" variant="secondary" label="↻ Update Graph" onPress={() => void updateGraph($, proj.graphify)} />
+    <Button key="graphify:update" variant="secondary" label="↻ Update Graph" onPress={() => void updateGraph($)} />
+  )
+  // Pull is there while GitHub has commits the branch does not, and not while the GitHub flow runs.
+  const pullButton = proj.behind > 0 && (gh.phase === 'idle' || gh.phase === 'done' || gh.phase === 'error') && (
+    <Button key="github:pull" variant="secondary" label={`↓ Pull (${proj.behind})`} onPress={() => void pullChanges($)} />
   )
   // The checks: a filled green dot when it is on, a hollow dim one when it is not, a yellow one when out of date.
   const checks = [
@@ -440,6 +529,7 @@ function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns:
       <Box flexDirection="row" justifyContent="space-between" gap={1} flexWrap="wrap">
         <Box flexDirection="row" gap={1}>
           {startButton}
+          {pullButton}
           {saveButton}
           {setupButton}
           {graphButton}
@@ -458,9 +548,7 @@ function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns:
           {session !== null && <Text dimColor>{`Session +${Number(session.toFixed(1))}%`}</Text>}
         </Box>
       </Box>
-    {proj.names.map(name => {
-      const run = scriptRuns[name]
-      if (!run) return null
+    {Object.entries(scriptRuns).map(([name, run]) => {
       const state = run.status === 'running' ? 'running' : run.status === 'stopping' ? 'stopping' : run.code === 0 ? 'finished' : run.code === null ? 'stopped' : `exited with code ${run.code}`
       return (
         <Box flexDirection="column">
@@ -469,6 +557,10 @@ function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns:
               {`${name} ${state}`}
             </Text>
             {run.url && run.status === 'running' && <Text color="suggestion">{run.url}</Text>}
+            {run.url && run.status === 'running' && <Button key={`script:open:${name}`} variant="secondary" label="↗ Open" onPress={() => void openUrl($, run.url ?? '')} />}
+            {run.status === 'exited' && run.code !== 0 && run.code !== null && run.busyPort && (
+              <Button key={`script:free:${name}`} variant="secondary" label={`✕ Free port ${run.busyPort} and start`} onPress={() => void freePortAndStart($, name, run.busyPort ?? 0)} />
+            )}
           </Box>
           {run.status === 'running' &&
             run.tail.slice(-2).map(line => (
@@ -528,6 +620,9 @@ export const register: Register = on => {
     if (usage) await setLimits($, usage.rateLimits)
     // The project's checks stay current: a new graph, a plugin enabled or a new remote shows within 10 s.
     $.clock.every(10_000, () => void readProject($).catch(() => undefined))
+    // What GitHub has: now and every 5 minutes, for the Pull button.
+    void fetchRemote($).catch(() => undefined)
+    $.clock.every(300_000, () => void fetchRemote($).catch(() => undefined))
     return started
   })
 
