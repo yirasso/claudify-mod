@@ -63,7 +63,7 @@ In Claude Code:
 
 ```bash
 /plugin marketplace add yirasso/claudify
-/plugin install claudify@tomas-plugins
+/plugin install claudify@yirasso
 ```
 
 Then start a new session (or run `/reload-plugins`). In Claude Desktop the band appears after your first message in a session.

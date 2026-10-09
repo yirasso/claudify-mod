@@ -1,6 +1,6 @@
 {
   "name": "claudify",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "Your project's everyday actions in a band above the Claude Code prompt: start the app, save to GitHub with Undo, pull, build, a knowledge graph and a typecheck that follow your work, and your usage limits.",
   "author": {
     "name": "Tomas Girao"

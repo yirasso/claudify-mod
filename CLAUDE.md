@@ -4,15 +4,15 @@ A Claude Code plugin (a "mod": function hooks, no MCP server) with one part: the
 
 The pane with the session's skills, MCP servers, connectors and plugins moved on 2026-10-09 to its own plugin, `setup-info`, in `C:\Dev\Claude Setup Info`.
 
-The owner is Tomás. He talks in European Portuguese (never Brazilian); the plugin's UI and code are in English. Repo: https://github.com/yirasso/claudify (branch `main`), **public since 2026-10-09** under the MIT license: others install it with `/plugin marketplace add yirasso/claudify` and `/plugin install claudify@tomas-plugins`. Keep secrets and personal data out of commits; the README (with `docs/band.png`) is the public face.
+The owner is Tomás. He talks in European Portuguese (never Brazilian); the plugin's UI and code are in English. Repo: https://github.com/yirasso/claudify (branch `main`), **public since 2026-10-09** under the MIT license: others install it with `/plugin marketplace add yirasso/claudify` and `/plugin install claudify@yirasso`. Keep secrets and personal data out of commits; the README (with `docs/band.png`) is the public face.
 
 ## Install and reload
 
-- **Installed for Tomás from GitHub** as `claudify@tomas-plugins`: the marketplace `tomas-plugins` is `yirasso/claudify` (`.claude-plugin/marketplace.json`, with the plugin at `source: "./"`). Claude Code runs a copy in `~/.claude/plugins/cache/tomas-plugins/claudify/<version>/`, not this folder.
-  - **To ship a change:** bump `version` in `.claude-plugin/plugin.json`, commit, push to `main`, then `claude plugin update claudify@tomas-plugins` and `/reload-plugins`.
+- **Installed for Tomás from GitHub** as `claudify@yirasso`: the marketplace `yirasso` (renamed from `tomas-plugins` on 2026-10-09) is `yirasso/claudify` (`.claude-plugin/marketplace.json`, with the plugin at `source: "./"`). Claude Code runs a copy in `~/.claude/plugins/cache/yirasso/claudify/<version>/`, not this folder.
+  - **To ship a change:** bump `version` in `.claude-plugin/plugin.json`, commit, push to `main`, then `claude plugin update claudify@yirasso` and `/reload-plugins`.
   - **To try edits before pushing:** `claude --plugin-dir C:\Dev\Claudify`.
 - **The `claude` CLI is not on PATH.** The binary is `%APPDATA%\Claude\claude-code\<version>\<hash>\claude.exe` (it was `2.1.293\83cb0bd7fed4` on 9 Oct 2026).
-- **Every change ships.** After each change (the three checks below passing): bump `version`, commit, push to `main`, `claude plugin update claudify@tomas-plugins` and `/reload-plugins`, so Tomás sees it in Claude straight away. No separate HTML mock-up: the UI is designed directly in `hooks/register.tsx`.
+- **Every change ships.** After each change (the three checks below passing): bump `version`, commit, push to `main`, `claude plugin update claudify@yirasso` and `/reload-plugins`, so Tomás sees it in Claude straight away. No separate HTML mock-up: the UI is designed directly in `hooks/register.tsx`.
 - **Before finishing a change**, all three must pass:
   - `claude plugin validate .`
   - `claude plugin test .` (43 tests, 9 files)
