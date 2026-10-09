@@ -160,3 +160,26 @@ test('from 70% a limit bar says how long until it resets', async ($, on) => {
   // Under 70%: no countdown.
   expect(shown).toContain('Week ███░░░░░ 40%\n')
 })
+
+test('a run that fails gets Send error to Claude, which sends its command, code and output', async ($, on) => {
+  on('fs.read', async () => ({ value: JSON.stringify({ scripts: { dev: 'vite' } }) }))
+  on('fs.exists', async () => ({ value: false }))
+  on('env.get', async () => ({ value: undefined }))
+  on('process.spawn', async function* () {
+    yield { stream: 'stderr' as const, text: '__PID__=7\nSyntaxError: Unexpected token in src/main.ts:3\n' }
+    return { value: { code: 1, signal: null } }
+  } as never)
+  on('session.usage', async () => ({ value: { startedAt: 0, context: {}, rateLimits: [] } }) as never)
+  let sent = ''
+  on('prompt.submit', async (_$: unknown, e: { text: string }) => ((sent = e.text), { drop: 'test' }) as never)
+  on('session.start', async () => ({ cwd: 'C:/Dev/Nau' }) as never)
+
+  await $.session.start({ cwd: 'C:/Dev/Nau', surface: 'desktop', isInteractive: true } as never)
+  const ui = await $.ui.mount({ plugin: 'claudify', surface: 'desktop', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false } as never })
+  await ui.press({ key: 'script:dev' })
+  await ui.press({ key: 'script:send:dev' })
+  expect(sent).toContain('`npm run dev`')
+  expect(sent).toContain('exit code 1')
+  expect(sent).toContain('SyntaxError: Unexpected token in src/main.ts:3')
+  expect(sent).not.toContain('__PID__')
+})

@@ -2,7 +2,7 @@
 
 A Claude Code plugin that adds a band above the prompt with the project's actions:
 
-- **Start / Stop Project**: runs what the project runs and shows its output: a `package.json` script (`dev`, `start`, `serve` or `preview`, with the lockfile's package manager), `npx expo start`, `cargo run`, `go run .`, a Python entry point (`manage.py runserver`, `main.py`, `app.py`; through `uv run` with a `uv.lock`) or a Godot project. While it runs, **↗ Open** opens its address; if it stops because its port is taken, **✕ Free port N and start** ends what holds the port and starts again.
+- **Start / Stop Project**: runs what the project runs and shows its output: a `package.json` script (`dev`, `start`, `serve` or `preview`, with the lockfile's package manager), `npx expo start`, `cargo run`, `go run .`, a Python entry point (`manage.py runserver`, `main.py`, `app.py`; through `uv run` with a `uv.lock`) or a Godot project. While it runs, **↗ Open** opens its address; if it stops because its port is taken, **✕ Free port N and start** ends what holds the port and starts again; if it fails otherwise, **✦ Send error to Claude** sends the command and its last output to Claude to fix.
 - **⬇ Install deps**: shown while `package.json` or the lockfile is newer than the last install (or `uv.lock` than `.venv`). Runs the package manager's install, or `uv sync`.
 - **↓ Pull (N)**: shown while GitHub has commits the branch does not (checked every 5 minutes). Fast-forwards the branch.
 - **Save Changes**: shown only while there is something to send to GitHub. Creates or publishes the GitHub repo, or commits and pushes. The commit message is written by Claude Haiku, and nothing runs until you confirm it.

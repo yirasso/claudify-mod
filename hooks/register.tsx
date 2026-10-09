@@ -18,7 +18,8 @@ const graphJob = atom({ plugin: 'claudify', key: 'graphJob' } as const, null)
 
 /** The package.json scripts Start Project runs, the first one there wins. */
 const START_SCRIPTS = ['dev', 'start', 'serve', 'preview'] as const
-const TAIL = 6
+/** Lines of a run's output kept (the band shows the last two; Send error to Claude sends them all). */
+const TAIL = 40
 
 /**
  * What Start Project runs in this folder: a package.json script (by its package manager's lockfile), Expo,
@@ -358,6 +359,15 @@ async function freePortAndStart($: EngineInterface, name: string, port: number):
   await runScript($, name, run.cmd)
 }
 
+/** Sends a failed run's command, exit code and last lines to Claude, asking for the cause and a fix. */
+async function sendError($: EngineInterface, name: string): Promise<void> {
+  const run = (await read($, runs))[name]
+  if (!run) return
+  const output = run.tail.filter(l => !l.startsWith('> ')).join('\n')
+  const fence = '```'
+  await $.prompt.submit({ text: `Start Project ran \`${run.cmd ?? name}\` and it failed with exit code ${run.code}. Its last output:\n\n${fence}\n${output}\n${fence}\n\nFind the cause and fix it.` })
+}
+
 /** Opens a dev server's address in the default browser. */
 async function openUrl($: EngineInterface, url: string): Promise<void> {
   if ((await $.env.get('OS')) === 'Windows_NT') await sh($, ['rundll32', 'url.dll,FileProtocolHandler', url])
@@ -605,6 +615,9 @@ function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns:
             </Text>
             {run.url && run.status === 'running' && <Text color="suggestion">{run.url}</Text>}
             {run.url && run.status === 'running' && <Button key={`script:open:${name}`} variant="secondary" label="↗ Open" onPress={() => void openUrl($, run.url ?? '')} />}
+            {run.status === 'exited' && run.code !== 0 && run.code !== null && !run.busyPort && name !== 'install' && (
+              <Button key={`script:send:${name}`} variant="secondary" label="✦ Send error to Claude" onPress={() => void sendError($, name)} />
+            )}
             {run.status === 'exited' && run.code !== 0 && run.code !== null && run.busyPort && (
               <Button key={`script:free:${name}`} variant="secondary" label={`✕ Free port ${run.busyPort} and start`} onPress={() => void freePortAndStart($, name, run.busyPort ?? 0)} />
             )}
