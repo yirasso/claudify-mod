@@ -664,26 +664,30 @@ export const register: Register = on => {
           // repository insights below. Drawn at the pane's width (480) so the type keeps its real size.
           <Svg
             source={dashboard({
-              bars: [
+              rings: [
                 ...(['five_hour', 'seven_day'] as const).map(kind => {
                   const l = lims.find(x => x.kind === kind)
-                  return { label: LIMIT_NAMES[kind] ?? kind, sub: l ? until(l.resetsAt, now) : 'no reading yet', percent: l ? l.percentUsed : null, color: kind === 'five_hour' ? ('red' as const) : ('yellow' as const) }
+                  return { label: kind === 'five_hour' ? 'Session' : 'Week', percent: l ? l.percentUsed : null, icon: kind === 'five_hour' ? ('clock' as const) : ('calendar' as const) }
                 }),
-                { label: 'Context', sub: ctx ? `${Math.round(ctx.tokens / 1000)}k of ${Math.round(ctx.window / 1000)}k` : 'no reading yet', percent: ctx ? ctx.percent : null, color: 'white' as const },
+                ...lims.filter(l => l.kind === 'spend_limit').map(l => ({ label: 'Spend', percent: l.percentUsed, icon: 'spark' as const })),
               ],
-              pill: (() => {
+              reset: (() => {
                 const session = lims.find(x => x.kind === 'five_hour')
-                const text = session ? until(session.resetsAt, now) : ''
-                return text ? text.replace(/^resets in/, 'Resets in') : 'This session'
+                return session ? until(session.resetsAt, now) : ''
               })(),
-              score: { value: checksOk, of: 3, caption: checksOk === 3 ? 'All set up' : `${3 - checksOk} to set up` },
+              context: { percent: ctx ? ctx.percent : null, detail: ctx ? `${Math.round(ctx.tokens / 1000)}k` : 'no reading yet' },
+              score: { value: checksOk, of: 3 },
+              checks: [
+                { name: 'graph', note: proj.graphify ? since(proj.graphify, now) : 'not built' },
+                { name: 'github', note: proj.github ? (proj.branch ?? proj.github) : 'no repo' },
+                { name: 'ponytail', note: proj.ponytail ? 'on' : 'not enabled' },
+              ],
               insight: insightRuns,
               badges: [
                 { name: 'graphify', ok: !!proj.graphify, mark: 'graph' },
                 { name: 'GitHub', ok: !!proj.github, mark: 'github' },
                 { name: 'Ponytail', ok: !!proj.ponytail, mark: 'ponytail' },
                 { name: proj.pm, ok: Object.values(scriptRuns).some(r => r.status === 'running'), mark: 'npm' },
-                { name: 'Claude', ok: true, mark: 'claude' },
               ],
             })}
             alt={`Usage: ${lims.map(l => `${LIMIT_NAMES[l.kind] ?? l.kind} ${Math.round(l.percentUsed)}%`).join(', ') || 'no reading yet'}. Project: ${checksOk} of 3 set up.`}
