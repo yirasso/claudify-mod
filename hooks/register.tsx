@@ -496,7 +496,8 @@ async function toggleNotify($: EngineInterface): Promise<void> {
 /** Opens the session folder in the file manager. */
 async function openFolder($: EngineInterface): Promise<void> {
   const cwd = await $.session.cwd()
-  if ((await $.env.get('OS')) === 'Windows_NT') await sh($, ['explorer.exe', cwd.replace(/\//g, '\\')])
+  // explorer.exe launched from the engine does not come up; PowerShell's Invoke-Item opens it reliably.
+  if ((await $.env.get('OS')) === 'Windows_NT') await sh($, ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', `Invoke-Item -LiteralPath '${cwd.replace(/\//g, '\\').replace(/'/g, "''")}'`])
   else if ((await sh($, ['open', cwd])).exitCode !== 0) await sh($, ['xdg-open', cwd])
 }
 

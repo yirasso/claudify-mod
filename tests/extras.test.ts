@@ -89,6 +89,6 @@ test('the bell turns the done sound for long turns on and off, and the folder an
 
   await ui.press({ key: 'project:folder' })
   await ui.press({ key: 'project:editor' })
-  expect(ran).toContain('explorer.exe C:\\Dev\\Nau')
+  expect(ran).toContain("powershell.exe -NoProfile -NonInteractive -Command Invoke-Item -LiteralPath 'C:\\Dev\\Nau'")
   expect(ran).toContain('cmd /c code C:/Dev/Nau')
 })
