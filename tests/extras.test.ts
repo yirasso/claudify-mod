@@ -66,11 +66,6 @@ test('the bell turns the done sound for long turns on and off, and the folder an
   on('store.get', async (_$: unknown, e: { key: string }) => ({ value: stored[e.key] }) as never)
   on('store.set', async (_$: unknown, e: { key: string; value: unknown }) => ((stored[e.key] = e.value), { value: undefined }) as never)
   on('turn.complete', async () => ({ text: 'done' }) as never)
-  const spawned: string[] = []
-  on('process.spawn', async function* (_$: unknown, e: { argv: readonly string[] }) {
-    spawned.push(e.argv.join(' '))
-    return { value: { code: 0, signal: null } }
-  } as never)
   const later = (globalThis as unknown as { setTimeout: (f: () => void, ms: number) => void }).setTimeout
   const settle = async () => {
     for (let i = 0; i < 10; i++) await new Promise<void>(r => later(r, 5))
@@ -97,8 +92,8 @@ test('the bell turns the done sound for long turns on and off, and the folder an
   expect(await ui.find({ key: 'project:editor' })).toBeTruthy()
   await ui.press({ key: 'project:folder' })
   await ui.press({ key: 'project:editor' })
-  // Explorer is spawned and left running (waiting for it killed its window).
-  expect(spawned).toContain('explorer.exe C:\\Dev\\Nau')
+  // The folder opens through the shell's FileProtocolHandler (explorer.exe never showed a window).
+  expect(ran).toContain('rundll32.exe url.dll,FileProtocolHandler C:\\Dev\\Nau')
   expect(ran).toContain('cmd /c code C:/Dev/Nau')
 })
 
