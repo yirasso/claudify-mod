@@ -96,19 +96,23 @@ const DOC_CHARS = 40_000
 const DOCS_SINCE = 'graphify-out/.claudify_docs_since'
 
 /**
- * Builds or updates the graph: `graphify update` reads the code with no model. Docs changed since the graph (or
- * since docs were last left out; every doc on a first build) go to Sonnet (`addDocs`), or with `withDocs` false
- * wait for the button, the dot staying yellow.
+ * Builds or updates the graph: `graphify update` reads the code with no model (`code: false` when graphify's
+ * own commit hook just did). Docs changed since `since` (by default the graph's date, or when docs were last left
+ * out; every doc on a first build) go to Sonnet (`addDocs`), or with `docs: false` wait, the dot staying yellow.
  */
-async function updateGraph($: EngineInterface, withDocs = true): Promise<void> {
+async function updateGraph($: EngineInterface, opts: { docs?: boolean; code?: boolean; since?: number } = {}): Promise<void> {
+  const withDocs = opts.docs ?? true
   const cwd = await $.session.cwd()
   const { graphify } = await read($, project)
   const waiting = Number((await $.fs.read(`${cwd}/${DOCS_SINCE}`).catch(() => '')).trim()) || null
-  const since = graphify === null ? null : (waiting ?? graphify)
-  await update($, graphJob, (): GraphJob => ({ text: 'Updating the graph from the code…' }))
+  const since = graphify === null ? null : Math.min(waiting ?? Infinity, opts.since ?? graphify)
+  await update($, graphJob, (): GraphJob => ({ text: opts.code === false ? 'Adding the commit\'s docs to the graph…' : 'Updating the graph from the code…' }))
   if (since === null) await ignoreGraphOutput($)
-  const built = await sh($, ['graphify', 'update', '.'], undefined, 600_000)
-  if (built.exitCode !== 0) return graphFailed($, `graphify update failed: ${lastLine(built.stderr)}`)
+  if (opts.code !== false) {
+    const built = await sh($, ['graphify', 'update', '.'], undefined, 600_000)
+    if (built.exitCode !== 0) return graphFailed($, `graphify update failed: ${lastLine(built.stderr)}`)
+    if (since === null) await installGraphHook($)
+  }
   const listed = since === null ? await sh($, ['git', 'ls-files']) : await sh($, ['git', 'log', `--since=@${Math.floor(since / 1000)}`, '--name-only', '--format='])
   const docs = [...new Set(listed.stdout.split('\n').map(f => f.trim()))].filter(f => DOC_FILE.test(f) && !f.startsWith('graphify-out/'))
   if (docs.length && withDocs && !(await addDocs($, docs))) return
@@ -186,6 +190,59 @@ async function graphFailed($: EngineInterface, text: string): Promise<void> {
 }
 
 const lastLine = (text: string): string => (text.trim().split('\n').pop() ?? '').slice(0, 160)
+
+/** graphify's own git hooks: after each commit or checkout they rebuild the code graph (no model) in the background. */
+async function installGraphHook($: EngineInterface): Promise<void> {
+  if (!(await read($, project)).git) return
+  if (/post-commit: installed/.test((await sh($, ['graphify', 'hook', 'status'])).stdout)) return
+  await sh($, ['graphify', 'hook', 'install'])
+}
+
+/** The commit the band last saw, and the working tree's code changes it last put in the graph (this load only). */
+let lastHead: string | null = null
+let lastTree: string | null = null
+
+/**
+ * A new commit: graphify's hook rebuilds its code in the background; once graph.json is newer than the commit
+ * (or after two minutes), the docs it changed go to Sonnet, with no button.
+ */
+async function followCommits($: EngineInterface): Promise<void> {
+  const p = await read($, project)
+  if (p.graphify === null || !p.git || (await read($, graphJob))) return
+  const head = (await sh($, ['git', 'rev-parse', 'HEAD'])).stdout.trim()
+  const before = lastHead
+  lastHead = head || lastHead
+  if (!head || before === null || before === head) return
+  const sinceBefore = Number((await sh($, ['git', 'log', '-1', '--format=%ct', before])).stdout.trim()) * 1000 + 1000
+  const committed = Number((await sh($, ['git', 'log', '-1', '--format=%ct', head])).stdout.trim()) * 1000
+  const docs = (await sh($, ['git', 'diff', '--name-only', before, head])).stdout.split('\n').map(f => f.trim()).filter(f => DOC_FILE.test(f) && !f.startsWith('graphify-out/'))
+  if (!docs.length) return
+  const hooked = /post-commit: installed/.test((await sh($, ['graphify', 'hook', 'status'])).stdout)
+  if (hooked) {
+    await update($, graphJob, (): GraphJob => ({ text: "Waiting for graphify's hook to rebuild the code…" }))
+    const cwd = await $.session.cwd()
+    for (let i = 0; i < 40; i++) {
+      const graph = await $.fs.stat(`${cwd}/graphify-out/graph.json`).catch(() => null)
+      if (graph && graph.mtimeMs >= committed) break
+      await $.clock.sleep(3000)
+    }
+  }
+  await updateGraph($, { code: !hooked, since: Number.isFinite(sinceBefore) && sinceBefore > 1000 ? sinceBefore : undefined })
+}
+
+/** After a turn that changed code (committed or not), the code graph follows with no model; docs wait for the commit. */
+async function followTurn($: EngineInterface): Promise<void> {
+  const p = await read($, project)
+  if (p.graphify === null || !p.git || (await read($, graphJob))) return
+  const tree = (await sh($, ['git', 'status', '--porcelain'])).stdout
+    .split('\n')
+    .filter(l => l.trim() && !/graphify-out\//.test(l) && !DOC_FILE.test(l.trim()))
+    .join('\n')
+  const before = lastTree
+  lastTree = tree
+  if (!tree || tree === before) return
+  await updateGraph($, { docs: false })
+}
 
 /** Adds graphify-out/ to .gitignore (creating it) unless it is there. */
 async function ignoreGraphOutput($: EngineInterface): Promise<void> {
@@ -480,7 +537,7 @@ async function runGithub($: EngineInterface): Promise<void> {
 /** The code part of the graph follows a push or a pull by itself (no model); changed docs wait for the button. */
 async function refreshCodeGraph($: EngineInterface): Promise<void> {
   await readProject($)
-  if ((await read($, project)).graphify !== null) await updateGraph($, false)
+  if ((await read($, project)).graphify !== null) await updateGraph($, { docs: false })
 }
 
 /** The Pull button: fast-forwards the branch to what GitHub has, reporting in the GitHub flow's lines. */
@@ -679,7 +736,8 @@ export const register: Register = on => {
     const usage = await $.session.usage().catch(() => null)
     if (usage) await setLimits($, usage.rateLimits)
     // The project's checks stay current: a new graph, a plugin enabled or a new remote shows within 10 s.
-    $.clock.every(10_000, () => void readProject($).catch(() => undefined))
+    $.clock.every(10_000, () => void readProject($).then(() => followCommits($)).catch(() => undefined))
+    if ((await read($, project)).graphify !== null) void installGraphHook($).catch(() => undefined)
     // What GitHub has: now and every 5 minutes, for the Pull button.
     void fetchRemote($).catch(() => undefined)
     $.clock.every(300_000, () => void fetchRemote($).catch(() => undefined))
@@ -717,6 +775,8 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
     await readProject($)
+    // The main thread's turn only: the code it changed goes into the graph, and a commit it made brings its docs.
+    if (e.agentId === undefined) void followCommits($).then(() => followTurn($)).catch(() => undefined)
     return done
   })
 }

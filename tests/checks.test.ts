@@ -126,3 +126,61 @@ test('graphify: a failed update shows its line and keeps Update Graph to try aga
   expect((await ui.findAll({ type: 'Text' })).map(t => t.text).join('\n')).toContain('graphify update failed: boom')
   expect(await ui.find({ key: 'graphify:update' })).toBeTruthy()
 })
+
+test('graphify follows the work: code a turn changed goes in with no model; a commit with docs brings them in by itself', async ($, on) => {
+  const files: Record<string, string> = { 'C:/Dev/Nau/README.md': '# Nau' }
+  const key = (path: string) => path.replace(/\\/g, '/')
+  on('fs.read', async (_$: unknown, e: { path: string }) => (key(e.path) in files ? { value: files[key(e.path)] } : { deny: 'ENOENT' }) as never)
+  on('fs.write', async (_$: unknown, e: { path: string; text: string }) => ((files[key(e.path)] = e.text), { value: undefined }) as never)
+  on('fs.exists', async () => ({ value: false }))
+  on('env.get', async (_$: unknown, e: { name: string }) => ({ value: e.name === 'USERPROFILE' ? 'C:/Users/T' : undefined }) as never)
+  files['C:/Users/T/.claude/skills/graphify/references/extraction-spec.md'] = '```\nFiles (chunk CHUNK_NUM of TOTAL_CHUNKS):\nFILE_LIST\n```'
+  on('settings.read', async () => ({ value: {} }) as never)
+  on('session.cwd', async () => ({ value: 'C:/Dev/Nau' }))
+  on('fs.list', async () => ({ value: [{ name: 'graph.json', kind: 'file', size: 2048, mtimeMs: Date.now(), isLink: false }] }) as never)
+  let head = 'aaa'
+  let tree = ''
+  const ran: string[] = []
+  on('process.run', async (_$: unknown, e: { argv: readonly string[] }) => {
+    const cmd = e.argv.join(' ')
+    ran.push(cmd)
+    const ok = (stdout = '') => ({ value: { exitCode: 0, stdout, stderr: '' } }) as never
+    if (cmd === 'git rev-parse --is-inside-work-tree') return ok('true\n')
+    if (cmd === 'git rev-parse HEAD') return ok(`${head}\n`)
+    if (cmd === 'git status --porcelain') return ok(tree)
+    if (cmd.startsWith('git log -1 --format=%ct')) return ok('1700000000\n')
+    if (cmd === 'git diff --name-only aaa bbb') return ok('src/app.ts\nREADME.md\n')
+    if (cmd.startsWith('git log --since') && cmd.includes('--name-only')) return ok(head === 'bbb' ? 'src/app.ts\nREADME.md\n' : '')
+    if (cmd === 'graphify hook status') return ok('post-commit: not installed\n')
+    return ok('')
+  })
+  on('session.usage', async () => ({ value: { startedAt: 0, context: {}, rateLimits: [] } }) as never)
+  const asked: string[] = []
+  on('model.complete', async (_$: unknown, e: { prompt: string }) => (asked.push(e.prompt), { value: { isAnswered: true, text: '{"nodes":[{"id":"readme_nau"}],"edges":[]}', usage: {} } }) as never)
+  on('turn.complete', async () => ({ text: 'done' }) as never)
+  on('session.start', async () => ({ cwd: 'C:/Dev/Nau' }) as never)
+  const settle = async () => {
+    const later = (globalThis as unknown as { setTimeout: (f: () => void, ms: number) => void }).setTimeout
+    for (let i = 0; i < 20; i++) await new Promise<void>(r => later(r, 5))
+  }
+  const turn = async () => {
+    await $.turn.complete({ reason: 'answer', answer: 'done', durationMs: 1, isAborted: false, turnId: 't' } as never)
+    await settle()
+  }
+
+  await $.session.start({ cwd: 'C:/Dev/Nau', surface: 'desktop', isInteractive: true } as never)
+  // A turn with nothing changed: no rebuild.
+  await turn()
+  expect(ran.filter(c => c === 'graphify update .').length).toBe(0)
+  // A turn that changed code: the code graph is rebuilt, no model.
+  tree = ' M src/app.ts\n'
+  await turn()
+  expect(ran.filter(c => c === 'graphify update .').length).toBe(1)
+  expect(asked.length).toBe(0)
+  // A commit that changed README.md: its docs go to Sonnet without a button.
+  head = 'bbb'
+  tree = ''
+  await turn()
+  expect(asked.some(p => p.includes('C:/Dev/Nau/README.md'))).toBe(true)
+  expect(ran.some(c => c.includes('graph_docs.py'))).toBe(true)
+})
