@@ -5,7 +5,7 @@ A Claude Code plugin that adds a band above the prompt with the project's action
 - **Start / Stop Project**: runs the project's `npm run dev` (or `start`) and shows its output.
 - **Save Changes**: creates or publishes the GitHub repo, or commits and pushes. The commit message is written by Claude, and nothing runs until you confirm it.
 - **Setup Project**: asks Claude to build the graphify graph and install [Ponytail](https://github.com/dietrichgebert/ponytail) when they are missing.
-- **Compact**: compacts the conversation, like `/compact`.
+- **GitHub · graphify · Ponytail**: a green dot (●) when each is on (an `origin` remote on GitHub, a graphify graph, the Ponytail plugin enabled), a dim hollow one (○) when not.
 
 The pane with the session's skills, MCP servers, connectors and plugins lives in its own plugin, `setup-info`.
 

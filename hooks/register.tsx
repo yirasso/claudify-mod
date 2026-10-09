@@ -1,5 +1,5 @@
-// The Claudify band above the prompt: the project's actions (Start/Stop Project, Save Changes, Setup Project,
-// Compact), with the script output and the GitHub confirm flow under them.
+// The Claudify band above the prompt: the project's actions (Start/Stop Project, Save Changes, Setup Project)
+// and whether GitHub, graphify and Ponytail are on, with the script output and the GitHub confirm flow under them.
 
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
@@ -230,9 +230,9 @@ async function runGithub($: EngineInterface): Promise<void> {
 type Ui = ReturnType<EngineInterface['ui']['resolve']>
 
 /**
- * The band above the prompt: the four actions (Start/Stop Project, Save Changes, Setup Project, Compact) as
- * real buttons with a symbol in front of the label (one that cannot act right now shows as dim text), then
- * what the scripts and the GitHub flow report.
+ * The band above the prompt: the three actions (Start/Stop Project, Save Changes, Setup Project) as real
+ * buttons with a symbol in front of the label (one that cannot act right now shows as dim text), a dot for
+ * each check (GitHub, graphify, Ponytail), then what the scripts and the GitHub flow report.
  */
 function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns: Record<string, ScriptRun>, gh: GithubFlow) {
   const { Box, Button, Text } = ui
@@ -261,15 +261,23 @@ function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns:
     ) : (
       <Text dimColor>⚙ Setup Project</Text>
     )
-  // Compact is the same call /compact makes; it is refused while a turn runs, which is not worth a message.
-  const compactButton = <Button key="session:compact" variant="secondary" label="⇊ Compact" onPress={() => void $.session.compact().catch(() => undefined)} />
+  // The checks: a filled green dot when it is on, a hollow dim one when it is not.
+  const checks = [
+    { key: 'check:github', label: 'GitHub', on: !!proj.github },
+    { key: 'check:graphify', label: 'graphify', on: proj.graphify !== null },
+    { key: 'check:ponytail', label: 'Ponytail', on: !!proj.ponytail },
+  ]
   return (
     <Box flexDirection="column">
       <Box flexDirection="row" gap={1} flexWrap="wrap">
         {startButton}
         {saveButton}
         {setupButton}
-        {compactButton}
+        {checks.map(c => (
+          <Text key={c.key} color={c.on ? 'success' : undefined} dimColor={!c.on}>
+            {`${c.on ? '●' : '○'} ${c.label}`}
+          </Text>
+        ))}
       </Box>
     {proj.names.map(name => {
       const run = scriptRuns[name]

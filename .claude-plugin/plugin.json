@@ -1,7 +1,7 @@
 {
   "name": "claudify",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "author": { "name": "Tomas Girao" },
-  "description": "A band above the prompt with the project's actions: Start/Stop Project, Save Changes (commit and push), Setup Project and Compact",
+  "description": "A band above the prompt with the project's actions (Start/Stop Project, Save Changes, Setup Project) and whether GitHub, graphify and Ponytail are on",
   "types": "./types/index.d.ts"
 }

@@ -1,6 +1,6 @@
 # Claudify plugin
 
-A Claude Code plugin (a "mod": function hooks, no MCP server) with one part: the **band above the prompt** with four action buttons (Start/Stop Project, Save Changes, Setup Project, Compact), and the script output and the GitHub confirm flow under them.
+A Claude Code plugin (a "mod": function hooks, no MCP server) with one part: the **band above the prompt** with three action buttons (Start/Stop Project, Save Changes, Setup Project) and a dot for each check (GitHub, graphify, Ponytail: green ● on, dim ○ off), and the script output and the GitHub confirm flow under them.
 
 The pane with the session's skills, MCP servers, connectors and plugins moved on 2026-10-09 to its own plugin, `setup-info`, in `C:\Dev\Claude Setup Info`.
 
