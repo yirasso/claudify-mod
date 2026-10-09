@@ -60,7 +60,7 @@ declare module 'claude-code' {
       weekStart: UsageLimit | null
       /** The graph's update while it runs, or null. */
       graphJob: GraphJob | null
-      /** Whether a long turn's end shows a notification (mirrored in the plugin's store, across sessions). */
+      /** Whether a long turn's end plays the done sound (mirrored in the plugin's store, across sessions). */
       notify: boolean
     }
   }

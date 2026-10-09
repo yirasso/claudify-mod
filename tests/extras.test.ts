@@ -58,7 +58,7 @@ test('after Save Changes, Undo reverts the commit and pushes the revert', async 
   expect(ran.filter(c => c === 'git push').length).toBe(2)
 })
 
-test('the bell turns the notification for long turns on and off, and the folder and editor buttons open them', async ($, on) => {
+test('the bell turns the done sound for long turns on and off, and the folder and editor buttons open them', async ($, on) => {
   const ran: string[] = []
   repo(on, 0, 0.5, ran)
   const stored: Record<string, unknown> = {}
@@ -73,7 +73,7 @@ test('the bell turns the notification for long turns on and off, and the folder 
     await $.turn.complete({ reason: 'answer', answer: 'done', durationMs: ms, isAborted: false, turnId: 't' } as never)
     await settle()
   }
-  const toasts = () => ran.filter(c => c.startsWith('powershell.exe') && c.includes('ToastNotification')).length
+  const toasts = () => ran.filter(c => c.startsWith('powershell.exe') && c.includes('SoundPlayer') && c.includes('done.wav')).length
 
   await $.session.start({ cwd: 'C:/Dev/Nau', surface: 'desktop', isInteractive: true } as never)
   const ui = await $.ui.mount({ plugin: 'claudify', surface: 'desktop', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false } as never })

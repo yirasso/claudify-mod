@@ -473,22 +473,18 @@ async function sendError($: EngineInterface, name: string): Promise<void> {
   await $.prompt.submit({ text: `Start Project ran \`${run.cmd ?? name}\` and it failed with exit code ${run.code}. Its last output:\n\n${fence}\n${output}\n${fence}\n\nFind the cause and fix it.` })
 }
 
-/** A Windows notification (through PowerShell's own app id, so no install is needed). */
-async function notifyDone($: EngineInterface, seconds: number): Promise<void> {
-  if ((await $.env.get('OS')) !== 'Windows_NT') return
-  const folder = ((await $.session.cwd().catch(() => '')).split(/[\\/]/).filter(Boolean).pop() ?? '').replace(/'/g, "''")
-  const script = [
-    '$null = [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]',
-    '$x = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)',
-    '$t = $x.GetElementsByTagName("text")',
-    `$null = $t.Item(0).AppendChild($x.CreateTextNode('Claude is done${folder ? ` · ${folder}` : ''}'))`,
-    `$null = $t.Item(1).AppendChild($x.CreateTextNode('The turn took ${Math.round(seconds / 60)} min.'))`,
-    "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe').Show([Windows.UI.Notifications.ToastNotification]::new($x))",
-  ].join('; ')
-  await sh($, ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', script])
+/**
+ * The done sound (sounds/done.wav, a short rising chime made for the band). On Windows through PowerShell's
+ * SoundPlayer, since the engine has no player there; elsewhere through the engine.
+ */
+async function playDone($: EngineInterface): Promise<void> {
+  if ((await $.env.get('OS')) === 'Windows_NT') {
+    const file = `${$.plugin.root}/sounds/done.wav`.replace(/\//g, '\\').replace(/'/g, "''")
+    await sh($, ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', `(New-Object Media.SoundPlayer '${file}').PlaySync()`])
+  } else await $.audio.play({ asset: 'sounds/done.wav' })
 }
 
-/** Turns the notifications on or off, for every session (kept in the plugin's store). */
+/** Turns the done sound on or off, for every session (kept in the plugin's store). */
 async function toggleNotify($: EngineInterface): Promise<void> {
   const on = !(await read($, notify))
   await update($, notify, () => on)
@@ -901,8 +897,8 @@ export const register: Register = on => {
     await readProject($)
     // The main thread's turn only: the code it changed goes into the graph, and a commit it made brings its docs.
     if (e.agentId === undefined) void followCommits($).then(() => followTurn($)).catch(() => undefined)
-    // A turn over a minute long: a notification, so the person can do something else meanwhile.
-    if (e.agentId === undefined && e.durationMs > 60_000 && (await read($, notify))) void notifyDone($, e.durationMs / 1000).catch(() => undefined)
+    // A turn over a minute long ends with the done sound, so the person can do something else meanwhile.
+    if (e.agentId === undefined && e.durationMs > 60_000 && (await read($, notify))) void playDone($).catch(() => undefined)
     return done
   })
 }

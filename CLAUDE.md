@@ -1,6 +1,6 @@
 # Claudify plugin
 
-A Claude Code plugin (a "mod": function hooks, no MCP server) with one part: the **band above the prompt** with the action buttons on the left (Start/Stop Project; Install deps only while the manifest or lockfile is newer than the last install; Pull only while GitHub is ahead; Save Changes only while something waits to go to GitHub; Setup Project only while GitHub, graphify or Ponytail is off; Update Graph only while commits newer than the graph wait to go into it, with a yellow graphify dot; 📁 and </> open the folder and VS Code) and, aligned right, the branch when it is not main, a dot for each check (green ● on, dim ○ off) the 5-hour and weekly limit bars (from 70% with the time until they reset) and how much of the week this session used, and the 🔔/🔕 toggle for the long-turn notification, and the script output (with Open for its address, Free port when its port was taken, and Send error to Claude when it failed) and the GitHub confirm flow under them.
+A Claude Code plugin (a "mod": function hooks, no MCP server) with one part: the **band above the prompt** with the action buttons on the left (Start/Stop Project; Install deps only while the manifest or lockfile is newer than the last install; Pull only while GitHub is ahead; Save Changes only while something waits to go to GitHub; Setup Project only while GitHub, graphify or Ponytail is off; Update Graph only while commits newer than the graph wait to go into it, with a yellow graphify dot; 📁 and </> open the folder and VS Code) and, aligned right, the branch when it is not main, a dot for each check (green ● on, dim ○ off) the 5-hour and weekly limit bars (from 70% with the time until they reset) and how much of the week this session used, and the 🔔/🔕 toggle for the long-turn sound, and the script output (with Open for its address, Free port when its port was taken, and Send error to Claude when it failed) and the GitHub confirm flow under them.
 
 The pane with the session's skills, MCP servers, connectors and plugins moved on 2026-10-09 to its own plugin, `setup-info`, in `C:\Dev\Claude Setup Info`.
 
@@ -34,7 +34,7 @@ The owner is Tomás. He talks in European Portuguese (never Brazilian); the plug
 ## Behaviour
 
 - **Save Changes** shows the files waiting and turns primary with more than 15 or two hours after the last commit; after it, **↶ Undo** (10 s) reverts the commit and pushes the revert.
-- **A turn over a minute** ends with a Windows notification (PowerShell's app id), unless the bell is off (`notify` atom, kept in `$.store`).
+- **A turn over a minute** ends with the done sound (`sounds/done.wav`, a chime generated for the band; PowerShell's SoundPlayer on Windows, `$.audio.play` elsewhere), unless the bell is off (`notify` atom, kept in `$.store`).
 - **Finished work folds back after 2 s** (`collapseSoon`): the GitHub flow's lines, a graph failure, and runs that ended. A failed run with a button (Send error, Free port) stays.
 
 ## Rules learned the hard way
