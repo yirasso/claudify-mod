@@ -5,11 +5,18 @@ for (const [graph, remote] of [
   [false, ''],
 ] as const) {
   test(`Setup Project is a button only while GitHub, graphify or Ponytail is missing, and sets them up in code (${graph ? 'with' : 'without'})`, async ($, on) => {
-    const files: Record<string, string> = { 'package.json': JSON.stringify({ scripts: { start: 'electron-vite dev' } }), 'C:/Dev/Nau/.gitignore': 'node_modules/' }
+    const files: Record<string, string> = {
+      'package.json': JSON.stringify({ scripts: { start: 'electron-vite dev' } }),
+      'C:/Dev/Nau/.gitignore': 'node_modules/',
+      'C:/Users/T/.claude/skills/graphify/references/extraction-spec.md': '# spec\n\n```\nFiles (chunk CHUNK_NUM of TOTAL_CHUNKS):\nFILE_LIST\n```\n',
+      'C:/Dev/Nau/README.md': '# Nau\nA boat.',
+      'C:/Dev/Nau/docs/guide.md': '# Guide',
+    }
     const key = (path: string) => path.replace(/\\/g, '/')
     on('fs.read', async (_$: unknown, e: { path: string }) => (key(e.path) in files ? { value: files[key(e.path)] } : { deny: 'ENOENT' }) as never)
     on('fs.write', async (_$: unknown, e: { path: string; text: string }) => ((files[key(e.path)] = e.text), { value: undefined }) as never)
     on('fs.exists', async () => ({ value: false }))
+    on('env.get', async (_$: unknown, e: { name: string }) => ({ value: e.name === 'USERPROFILE' ? 'C:/Users/T' : undefined }) as never)
     on('settings.read', async () => ({ value: graph ? { enabledPlugins: { 'ponytail@ponytail': true } } : {} }) as never)
     on('session.cwd', async () => ({ value: 'C:/Dev/Nau' }))
     on('fs.list', async () => ({ value: graph ? [{ name: 'graph.json', kind: 'file', size: 2048, mtimeMs: Date.now() - 2 * 86_400_000, isLink: false }] : [{ name: 'package.json', kind: 'file', size: 64, mtimeMs: 0, isLink: false }] }) as never)
@@ -19,17 +26,19 @@ for (const [graph, remote] of [
       ran.push(cmd)
       const ok = (stdout = '') => ({ value: { exitCode: 0, stdout, stderr: '' } }) as never
       if (cmd === 'graphify update .') return ok('Code graph updated.\n')
+      if (cmd.includes('graph_docs.py')) return ok('12 nodes\n')
       if (cmd === 'git ls-files') return ok('README.md\nsrc/main.ts\ndocs/guide.md\n')
       if (cmd.includes('remote get-url')) return { value: { exitCode: remote ? 0 : 2, stdout: remote, stderr: '' } } as never
       if (cmd.includes('rev-parse')) return ok(graph ? 'main\n' : 'false\n')
       return { value: { exitCode: 1, stdout: '', stderr: '' } } as never
     })
     on('session.usage', async () => ({ value: { startedAt: 0, context: {}, rateLimits: [] } }) as never)
-    on('agent.register', async (_$: unknown, e: { name: string }) => ({ value: { agent: `claudify:${e.name}` } }) as never)
-    const spawned: { subagent_type?: string; prompt: string }[] = []
-    on('agent.spawn', async (_$: unknown, e: { subagent_type?: string; prompt: string }) => (spawned.push(e), { model: 'claude-sonnet-5-5', agentId: 'a1' }) as never)
-    let model = ''
-    on('model.complete', async (_$: unknown, e: { model: string }) => ((model = e.model), { value: { isAnswered: true, text: 'Initial commit', usage: {} } }) as never)
+    const asked: { model: string; prompt: string }[] = []
+    on('model.complete', async (_$: unknown, e: { model: string; prompt: string }) => {
+      asked.push(e)
+      const text = e.prompt.includes('FILE_LIST') || e.prompt.includes('Files (chunk') ? '{"nodes":[{"id":"readme_nau","label":"Nau"}],"edges":[]}' : 'Initial commit'
+      return { value: { isAnswered: true, text, usage: {} } } as never
+    })
     on('session.start', async () => ({ cwd: 'C:/Dev/Nau' }) as never)
 
     await $.session.start({ cwd: 'C:/Dev/Nau', surface: 'terminal', isInteractive: true } as never)
@@ -43,13 +52,17 @@ for (const [graph, remote] of [
     expect(JSON.parse(files['C:/Dev/Nau/.claude/settings.json'] ?? '{}').enabledPlugins).toEqual({ 'ponytail@ponytail': true })
     expect(files['C:/Dev/Nau/.gitignore']).toBe('node_modules/\ngraphify-out/\n')
     expect(ran).toContain('graphify update .')
-    // Only the docs go to Sonnet, as the band's own agent.
-    expect(spawned.length).toBe(1)
-    expect(spawned[0]?.subagent_type).toBe('claudify:graph-docs')
-    expect(spawned[0]?.prompt).toContain('README.md\ndocs/guide.md')
-    expect(spawned[0]?.prompt).not.toContain('src/main.ts')
-    // The first commit's message comes from Sonnet, and nothing is pushed before the person confirms.
-    expect(model).toBe('claude-sonnet-5-5')
+    // Only the docs go to Sonnet, as text with the skill's spec; graph_docs.py merges what it returned.
+    const docsAsk = asked.find(a => a.prompt.includes('Files (chunk 1 of 1)'))
+    expect(docsAsk?.model).toBe('claude-sonnet-5-5')
+    expect(docsAsk?.prompt).toContain('C:/Dev/Nau/README.md\nC:/Dev/Nau/docs/guide.md')
+    expect(docsAsk?.prompt).toContain('A boat.')
+    expect(docsAsk?.prompt).not.toContain('src/main.ts')
+    expect(JSON.parse(files['C:/Dev/Nau/graphify-out/.graphify_chunk_01.json'] ?? '{}').nodes).toHaveLength(1)
+    expect(ran.some(c => c.includes('graph_docs.py'))).toBe(true)
+    // The first commit's message comes from Sonnet too, and nothing is pushed before the person confirms.
+    expect(asked.filter(a => a !== docsAsk).every(a => a.model === 'claude-sonnet-5-5')).toBe(true)
+    expect(asked.length).toBe(2)
     expect(await ui.find({ key: 'github:confirm' })).toBeTruthy()
     expect(ran.some(c => c.startsWith('gh repo create'))).toBe(false)
   })

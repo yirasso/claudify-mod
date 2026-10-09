@@ -34,8 +34,8 @@ export type GithubFlow = {
   log: string[]
 }
 
-/** The graph being built or updated: the line the band shows, Sonnet's agent while it adds the docs, a failure. */
-export type GraphJob = { text: string; agentId?: string; isError?: boolean }
+/** The graph being built or updated: the line the band shows, and whether it is a failure. */
+export type GraphJob = { text: string; isError?: boolean }
 
 declare module 'claude-code' {
   interface PluginState {

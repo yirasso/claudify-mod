@@ -25,8 +25,8 @@ The owner is Tomás. He talks in European Portuguese (never Brazilian); the plug
 - `hooks/register.tsx`: every hook.
   - **Events handled:** `session.start`, `turn.complete`, `ui.render` (`AbovePrompt`), `session.measure` (the limit bars), `session.end`.
   - **What it renders:** `AbovePrompt` (the band: `actionBar`).
-  - **Its functions:** `readProject` (every 10 s, via `$.clock.every`), `runScript`/`stopScript`/`killTree`, `prepareGithub`/`runGithub` (the commit message comes from `$.model.complete` with Haiku 5.5 at medium effort, Sonnet 5.5 when Setup Project calls it, and nothing runs before the user confirms), `setupProject`/`enablePonytail`/`updateGraph`, `actionBar`.
-  - **Setup Project and Update Graph run in code; a model only where code can't:** Ponytail goes on in the project's `.claude/settings.json`, `graphify-out/` into `.gitignore`, `graphify update .` builds the code graph with no model. Only docs (`.md`, `.txt`, `.rst`, `.pdf`) changed since the graph go to the `claudify:graph-docs` subagent (Sonnet 5.5, medium effort, registered in `session.start`, hidden from the model's Agent tool), spawned in the background; its `turn.complete` clears the band's line.
+  - **Its functions:** `readProject` (every 10 s, via `$.clock.every`), `runScript`/`stopScript`/`killTree`, `prepareGithub`/`runGithub` (the commit message comes from `$.model.complete` with Haiku 5.5 at medium effort, Sonnet 5.5 when Setup Project calls it, and nothing runs before the user confirms), `setupProject`/`enablePonytail`/`updateGraph`/`addDocs`, `actionBar`.
+  - **Setup Project and Update Graph run in code; a model only where code can't:** Ponytail goes on in the project's `.claude/settings.json`, `graphify-out/` into `.gitignore`, `graphify update .` builds the code graph with no model. Only docs (`.md`, `.mdx`, `.txt`, `.rst`) changed since the graph go to Sonnet 5.5 (medium effort) through `$.model.complete` (`addDocs`): their text in batches, with the graphify skill's own extraction spec (`~/.claude/skills/graphify/references/extraction-spec.md`). `scripts/graph_docs.py`, run with graphify's Python, merges the chunks into the graph in code (cache, merge, cluster, community names kept from the old graph, report, html).
 - `types/index.d.ts`: the state contract (`PluginState`). The atoms are `project` (with `pending`: something to send to GitHub), `runs`, `github`, `limits`, `graphJob` (the graph update's line) and `weekStart` (the weekly reading the session started from: «Session +N%» is the week minus it; a weekly reset or `/clear` starts it over).
 - `tests/`: `actions`, `checks`, `github`, `scripts`.
 
@@ -38,6 +38,7 @@ The owner is Tomás. He talks in European Portuguese (never Brazilian); the plug
 - **`$`** may only be passed to top-level functions.
 - **`$.ui.resolve(e)`** gives the elements per surface: Box/Text/Button everywhere, Svg on desktop only.
 - **The graphify check** uses `$.session.cwd()` plus `graphify-out/graph.json`. `fs.list('.')` failed.
+- **A plugin can't spawn an Agent under auto mode**: the classifier refuses it ("the request that produced this action did not ask for one"). Call the model with `$.model.complete` instead.
 - **`$.fs.write`/`read` with a relative path** resolve against the process, not the session folder: build paths from `$.session.cwd()`.
 - **`graphify update .`** (code only) re-reads `README.md` as code and drops its semantic nodes; the next docs pass brings them back.
 - **Stopping a script** on Windows: `taskkill /T /F` exits with code 1. Show «stopped», not a failure.
@@ -49,7 +50,7 @@ The owner is Tomás. He talks in European Portuguese (never Brazilian); the plug
 - Register every `on()` before the first `$` call.
 - A second `ui.mount` needs another `requestId`.
 - `$.clock` exists at runtime, but the kit's types leave it out.
-- An `agent.spawn` hook gets the Agent tool's input (`subagent_type`, `prompt`); a `model.complete` answer is `{ value: ... }`.
+- A `model.complete` answer is `{ value: ... }`; `fs.read`/`fs.write` hooks get absolute paths with backslashes.
 
 **Design (Tomás's feedback)**
 - No glass icons and no fancy decoration: he called a first card UI «bugado e feio».

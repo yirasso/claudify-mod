@@ -56,44 +56,98 @@ async function enablePonytail($: EngineInterface): Promise<void> {
   $.ui.toast('Ponytail is on for this project: /reload-plugins loads it.')
 }
 
-/** Files graphify reads with a model (docs, papers); code it reads alone. */
-// shortcut: images and other media graphify also reads are left out; add them when a project needs them.
-const DOC_FILE = /\.(md|mdx|txt|rst|pdf)$/i
+/** Files graphify reads with a model (docs); code it reads alone. */
+// shortcut: PDFs, images and other media graphify also reads are left out; add them when a project needs them.
+const DOC_FILE = /\.(md|mdx|txt|rst)$/i
+/** How much of the docs goes to Sonnet in one request, and how much of one doc. */
+const DOC_BATCH_CHARS = 80_000
+const DOC_CHARS = 40_000
 
 /**
  * Builds or updates the graph: `graphify update` reads the code with no model; only docs changed since
- * `since` (every doc, on a first build) go to Sonnet, as a subagent of its own in the background.
+ * `since` (every doc, on a first build) go to Sonnet (`addDocs`).
  */
 async function updateGraph($: EngineInterface, since: number | null): Promise<void> {
   await update($, graphJob, (): GraphJob => ({ text: 'Updating the graph from the code…' }))
   if (since === null) await ignoreGraphOutput($)
   const built = await sh($, ['graphify', 'update', '.'], undefined, 600_000)
-  if (built.exitCode !== 0) {
-    await update($, graphJob, (): GraphJob => ({ text: `graphify update failed: ${(built.stderr.trim().split('\n').pop() ?? '').slice(0, 160)}`, isError: true }))
-    return
-  }
+  if (built.exitCode !== 0) return graphFailed($, `graphify update failed: ${lastLine(built.stderr)}`)
   const listed = since === null ? await sh($, ['git', 'ls-files']) : await sh($, ['git', 'log', `--since=@${Math.floor(since / 1000)}`, '--name-only', '--format='])
   const docs = [...new Set(listed.stdout.split('\n').map(f => f.trim()))].filter(f => DOC_FILE.test(f) && !f.startsWith('graphify-out/'))
-  if (!docs.length) {
-    await update($, graphJob, () => null)
-    await readProject($)
-    return
-  }
-  const spawned = await $.agent
-    .spawn({
-      subagentType: 'claudify:graph-docs',
-      description: 'Add docs to the graph',
-      prompt: `The code part of this project's graphify graph is already up to date. Add these docs to it with the graphify skill (/graphify . --update), extracting them yourself since you cannot dispatch subagents:\n${docs.slice(0, 200).join('\n')}`,
-    })
-    .catch((err: unknown) => ({ deny: String(err) }))
-  if (!('agentId' in spawned) || !spawned.agentId) {
-    await update($, graphJob, (): GraphJob => ({ text: `Could not start Sonnet for the docs: ${'deny' in spawned ? String(spawned.deny) : 'no agent'}`, isError: true }))
-    return
-  }
-  const agentId = spawned.agentId
-  await update($, graphJob, (): GraphJob => ({ text: `Code done; Sonnet is adding ${docs.length} doc${docs.length === 1 ? '' : 's'} to the graph…`, agentId }))
+  if (docs.length) await addDocs($, docs)
+  else await update($, graphJob, () => null)
   await readProject($)
 }
+
+/**
+ * The docs part, the only one that needs a model: Sonnet 5.5 (medium effort) reads the docs in batches with
+ * the graphify skill's own extraction spec, and graph_docs.py merges what it wrote into the graph in code.
+ */
+async function addDocs($: EngineInterface, docs: string[]): Promise<void> {
+  const cwd = await $.session.cwd()
+  const specPath = `${(await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME')) ?? ''}/.claude/skills/graphify/references/extraction-spec.md`
+  const specText = await $.fs.read(specPath).catch(() => '')
+  // The subagent prompt is the spec's fenced block; the band sends the files' text instead of paths to read.
+  const spec = /```\n([\s\S]*?)\n```/.exec(specText)?.[1]
+  if (!spec) return graphFailed($, `The graphify skill's extraction spec was not found (${specPath}).`)
+
+  const texts: { path: string; text: string }[] = []
+  for (const doc of docs) {
+    const text = await $.fs.read(`${cwd}/${doc}`).catch(() => null)
+    if (text !== null) texts.push({ path: `${cwd}/${doc}`, text: text.slice(0, DOC_CHARS) })
+  }
+  const batches: (typeof texts)[] = []
+  for (const t of texts) {
+    const last = batches[batches.length - 1]
+    if (last && last.reduce((n, x) => n + x.text.length, 0) + t.text.length <= DOC_BATCH_CHARS) last.push(t)
+    else batches.push([t])
+  }
+  for (const [i, batch] of batches.entries()) {
+    await update($, graphJob, (): GraphJob => ({ text: `Code done; Sonnet is reading ${texts.length} doc${texts.length === 1 ? '' : 's'} for the graph (${i + 1}/${batches.length})…` }))
+    const prompt = spec
+      .replace('CHUNK_NUM', String(i + 1))
+      .replace('TOTAL_CHUNKS', String(batches.length))
+      .replace('FILE_LIST', batch.map(b => b.path).join('\n'))
+      .replace(/DEEP_MODE \(if --mode deep was given\)/, 'DEEP_MODE (off for this run)')
+    const reply = await $.model.complete({
+      model: SETUP_MODEL,
+      effort: 'medium',
+      maxTokens: 16_000,
+      system: 'You extract knowledge graph fragments for graphify. The files are given to you below, so do not try to read or write any file: reply with the JSON object only.',
+      prompt: `${prompt}\n\nThe files' contents:\n\n${batch.map(b => `===== ${b.path} =====\n${b.text}`).join('\n\n')}`,
+    })
+    const json = reply.isAnswered ? /\{[\s\S]*\}/.exec(reply.text)?.[0] : undefined
+    let parsed: { nodes?: unknown[] } | null = null
+    try {
+      parsed = json ? (JSON.parse(json) as { nodes?: unknown[] }) : null
+    } catch {
+      parsed = null
+    }
+    if (!parsed || !Array.isArray(parsed.nodes)) return graphFailed($, `Sonnet did not return the docs' graph (${reply.isAnswered ? 'no valid JSON' : reply.reason}).`)
+    await $.fs.write(`${cwd}/graphify-out/.graphify_chunk_${String(i + 1).padStart(2, '0')}.json`, JSON.stringify(parsed))
+  }
+
+  await update($, graphJob, (): GraphJob => ({ text: 'Merging the docs into the graph…' }))
+  const merged = await sh($, [await graphifyPython($, cwd), `${$.plugin.root}/scripts/graph_docs.py`, cwd, specPath], undefined, 600_000)
+  if (merged.exitCode !== 0) return graphFailed($, `Merging the docs failed: ${lastLine(merged.stderr || merged.stdout)}`)
+  await update($, graphJob, () => null)
+}
+
+/** The Python graphify runs on: the one the skill saved, else uv's tool environment, else python. */
+async function graphifyPython($: EngineInterface, cwd: string): Promise<string> {
+  const saved = (await $.fs.read(`${cwd}/graphify-out/.graphify_python`).catch(() => '')).replace(/^﻿/, '').trim()
+  if (saved && (await $.fs.exists(saved))) return saved
+  const uvDir = (await sh($, ['uv', 'tool', 'dir'])).stdout.trim()
+  const uvPython = `${uvDir}/graphifyy/Scripts/python.exe`
+  return uvDir && (await $.fs.exists(uvPython)) ? uvPython : 'python'
+}
+
+/** The graph's line shows what went wrong. */
+async function graphFailed($: EngineInterface, text: string): Promise<void> {
+  await update($, graphJob, (): GraphJob => ({ text: text.slice(0, 200), isError: true }))
+}
+
+const lastLine = (text: string): string => (text.trim().split('\n').pop() ?? '').slice(0, 160)
 
 /** Adds graphify-out/ to .gitignore (creating it) unless it is there. */
 async function ignoreGraphOutput($: EngineInterface): Promise<void> {
@@ -101,16 +155,6 @@ async function ignoreGraphOutput($: EngineInterface): Promise<void> {
   const text = await $.fs.read(file).catch(() => '')
   if (/^\/?graphify-out\/?\s*$/m.test(text)) return
   await $.fs.write(file, `${text}${text && !text.endsWith('\n') ? '\n' : ''}graphify-out/\n`)
-}
-
-/** The subagent that adds docs to the graph: Sonnet 5.5 at medium effort, kept from the model's own Agent tool. */
-const GRAPH_DOCS_AGENT = {
-  name: 'graph-docs',
-  description: "Adds a project's changed docs to its graphify knowledge graph.",
-  prompt:
-    "You keep a project's graphify knowledge graph up to date. Use the graphify skill's --update flow on the current folder. The code part is already done; extract the docs you are given yourself, following the skill's extraction spec, then finish the update (merge, cluster, label, report, html, manifest). Touch nothing outside graphify-out/. End with one line: the graph's nodes and edges and what changed.",
-  model: SETUP_MODEL,
-  effort: 'medium',
 }
 
 async function readProject($: EngineInterface): Promise<void> {
@@ -482,7 +526,6 @@ export const register: Register = on => {
     if (usage) await setLimits($, usage.rateLimits)
     // The project's checks stay current: a new graph, a plugin enabled or a new remote shows within 10 s.
     $.clock.every(10_000, () => void readProject($).catch(() => undefined))
-    await $.agent.register(GRAPH_DOCS_AGENT).catch(() => undefined)
     return started
   })
 
@@ -498,9 +541,6 @@ export const register: Register = on => {
     const job = await read($, graphJob)
     return <Box flexDirection="column">{actionBar($, $.ui.resolve(e), proj, scriptRuns, gh, usage, base, job)}</Box>
   })
-
-  // The graph's docs agent is the band's alone: the model's Agent tool does not offer it.
-  on('agent.offer', { agent: 'claudify:graph-docs' }, () => ({ isOffered: false }))
 
   // The limit bars follow the windows as the engine measures them.
   on('session.measure', async ($, e, next) => {
@@ -519,9 +559,6 @@ export const register: Register = on => {
   // When the turn ends, the project is read again (a graph built, a plugin installed).
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
-    // Sonnet finished the graph's docs: its line goes.
-    const job = await read($, graphJob)
-    if (job?.agentId && e.agentId === job.agentId) await update($, graphJob, () => null)
     await readProject($)
     return done
   })
