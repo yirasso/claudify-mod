@@ -3,7 +3,7 @@ import { expect, test } from 'claude-code/testing'
 /** A repo on GitHub on a feature branch, with `files` changed and the last commit `hoursAgo` hours ago. */
 // The test's `on`, loosely typed: each call below names its own event.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function repo(on: (...args: any[]) => unknown, files: number, hoursAgo: number, ran: string[]) {
+function repo(on: (...args: any[]) => unknown, files: number, hoursAgo: number, ran: string[], hasCode = true) {
   on('fs.read', async () => ({ deny: 'ENOENT' }) as never)
   on('fs.exists', async () => ({ value: false }))
   on('env.get', async (_$: unknown, e: { name: string }) => ({ value: e.name === 'OS' ? 'Windows_NT' : undefined }) as never)
@@ -14,6 +14,7 @@ function repo(on: (...args: any[]) => unknown, files: number, hoursAgo: number, 
     const cmd = e.argv.join(' ')
     ran.push(cmd)
     const ok = (stdout = '') => ({ value: { exitCode: 0, stdout, stderr: '' } }) as never
+    if (cmd === 'cmd /c where code') return { value: { exitCode: hasCode ? 0 : 1, stdout: '', stderr: '' } } as never
     if (cmd === 'git rev-parse --is-inside-work-tree') return ok('true\n')
     if (cmd === 'git remote get-url origin') return ok('https://github.com/yirasso/nau.git\n')
     if (cmd === 'git remote -v') return ok('origin\thttps://github.com/yirasso/nau.git (push)\n')
@@ -87,8 +88,19 @@ test('the bell turns the done sound for long turns on and off, and the folder an
   await turn(90_000)
   expect(toasts()).toBe(1)
 
+  // VS Code was found (`where code` answered): its button is there.
+  expect(await ui.find({ key: 'project:editor' })).toBeTruthy()
   await ui.press({ key: 'project:folder' })
   await ui.press({ key: 'project:editor' })
   expect(ran).toContain("powershell.exe -NoProfile -NonInteractive -Command Invoke-Item -LiteralPath 'C:\\Dev\\Nau'")
   expect(ran).toContain('cmd /c code C:/Dev/Nau')
+})
+
+test('without VS Code the </> button is not there', async ($, on) => {
+  const ran: string[] = []
+  repo(on, 0, 0.5, ran, false)
+  await $.session.start({ cwd: 'C:/Dev/Nau', surface: 'desktop', isInteractive: true } as never)
+  const ui = await $.ui.mount({ plugin: 'claudify', surface: 'desktop', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false } as never })
+  expect(await ui.find({ key: 'project:folder' })).toBeTruthy()
+  expect(await ui.find({ key: 'project:editor' })).toBeUndefined()
 })

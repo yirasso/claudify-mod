@@ -14,6 +14,7 @@ const limits = atom({ plugin: 'claudify', key: 'limits' } as const, [])
 const weekStart = atom({ plugin: 'claudify', key: 'weekStart' } as const, null)
 const graphJob = atom({ plugin: 'claudify', key: 'graphJob' } as const, null)
 const notify = atom({ plugin: 'claudify', key: 'notify' } as const, true)
+const vscode = atom({ plugin: 'claudify', key: 'vscode' } as const, false)
 
 // ——— The project: what Start Project runs, and the checks ———
 
@@ -501,6 +502,13 @@ async function openFolder($: EngineInterface): Promise<void> {
   else if ((await sh($, ['open', cwd])).exitCode !== 0) await sh($, ['xdg-open', cwd])
 }
 
+/** Whether VS Code's `code` command is installed (looked up once per load, for the </> button). */
+async function findVscode($: EngineInterface): Promise<void> {
+  const windows = (await $.env.get('OS')) === 'Windows_NT'
+  const found = (await sh($, windows ? ['cmd', '/c', 'where', 'code'] : ['sh', '-c', 'command -v code'])).exitCode === 0
+  await update($, vscode, () => found)
+}
+
 /** Opens the session folder in VS Code (`code` is a .cmd on Windows, so through cmd). */
 async function openEditor($: EngineInterface): Promise<void> {
   const cwd = await $.session.cwd()
@@ -691,7 +699,7 @@ function untilReset(ms: number): string {
  * off); on the right a dot for each check (GitHub, graphify, Ponytail) and the 5-hour and weekly limit
  * bars; then what the scripts and the GitHub flow report.
  */
-function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns: Record<string, ScriptRun>, gh: GithubFlow, usage: UsageLimit[], base: UsageLimit | null, job: GraphJob | null, notifyOn: boolean) {
+function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns: Record<string, ScriptRun>, gh: GithubFlow, usage: UsageLimit[], base: UsageLimit | null, job: GraphJob | null, notifyOn: boolean, hasVscode: boolean) {
   const { Box, Button, Text } = ui
   // Start Project runs what this kind of project runs (startCommand).
   const start = proj.start
@@ -760,7 +768,7 @@ function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns:
           {setupButton}
           {graphButton}
           <Button key="project:folder" variant="secondary" label="📁" onPress={() => void openFolder($)} />
-          <Button key="project:editor" variant="secondary" label="</>" onPress={() => void openEditor($)} />
+          {hasVscode && <Button key="project:editor" variant="secondary" label="</>" onPress={() => void openEditor($)} />}
         </Box>
         <Box flexDirection="row" gap={2}>
           {proj.branch && !MAIN_BRANCHES.includes(proj.branch) && <Text color="warning">{`⎇ ${proj.branch}`}</Text>}
@@ -852,6 +860,7 @@ export const register: Register = on => {
     await collapse($)
     const notifyOn = await $.store.get('notify').catch(() => undefined)
     if (typeof notifyOn === 'boolean') await update($, notify, () => notifyOn)
+    void findVscode($).catch(() => undefined)
     await readProject($)
     const usage = await $.session.usage().catch(() => null)
     if (usage) await setLimits($, usage.rateLimits)
@@ -875,7 +884,8 @@ export const register: Register = on => {
     const base = await read($, weekStart)
     const job = await read($, graphJob)
     const notifyOn = await read($, notify)
-    return <Box flexDirection="column">{actionBar($, $.ui.resolve(e), proj, scriptRuns, gh, usage, base, job, notifyOn)}</Box>
+    const hasVscode = await read($, vscode)
+    return <Box flexDirection="column">{actionBar($, $.ui.resolve(e), proj, scriptRuns, gh, usage, base, job, notifyOn, hasVscode)}</Box>
   })
 
   // The limit bars follow the windows as the engine measures them.

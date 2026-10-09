@@ -62,6 +62,8 @@ declare module 'claude-code' {
       graphJob: GraphJob | null
       /** Whether a long turn's end plays the done sound (mirrored in the plugin's store, across sessions). */
       notify: boolean
+      /** Whether VS Code's `code` command is installed (the </> button shows only then). */
+      vscode: boolean
     }
   }
 }
