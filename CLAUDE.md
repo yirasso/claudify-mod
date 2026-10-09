@@ -37,6 +37,7 @@ The owner is Tomás. He talks in European Portuguese (never Brazilian); the plug
 - **`$`** may only be passed to top-level functions.
 - **`$.ui.resolve(e)`** gives the elements per surface: Box/Text/Button everywhere, Svg on desktop only.
 - **The graphify check** uses `$.session.cwd()` plus `graphify-out/graph.json`. `fs.list('.')` failed.
+- **`/clear`** fires `session.end` (`reason: 'clear'`) and no `session.start`; Claude Desktop drops the band until something redraws it, so the hook calls `$.ui.invalidate('ui.render')`.
 - **Stopping a script** on Windows: `taskkill /T /F` exits with code 1. Show «stopped», not a failure.
 - **TS literal widening** in `update(...)`: type the records (`ScriptRun`, `GithubFlow`).
 

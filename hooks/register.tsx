@@ -407,7 +407,10 @@ export const register: Register = on => {
   // When the session ends, whatever the buttons left running is ended too.
   on('session.end', async ($, e, next) => {
     for (const run of Object.values(await read($, runs))) if (run.status !== 'exited' && run.pid) await killTree($, run.pid)
-    return next(e)
+    const ended = await next(e)
+    // A /clear goes on with no session.start, and Claude Desktop drops the band until the next write: draw it again.
+    if (e.reason === 'clear') $.clock.after(500, () => void readProject($).then(() => $.ui.invalidate('ui.render')).catch(() => undefined))
+    return ended
   })
 
   // When the turn ends, the project is read again (a graph built, a plugin installed).
