@@ -34,6 +34,9 @@ export type GithubFlow = {
   log: string[]
 }
 
+/** The graph being built or updated: the line the band shows, Sonnet's agent while it adds the docs, a failure. */
+export type GraphJob = { text: string; agentId?: string; isError?: boolean }
+
 declare module 'claude-code' {
   interface PluginState {
     'claudify': {
@@ -47,6 +50,8 @@ declare module 'claude-code' {
       limits: UsageLimit[]
       /** The weekly window as this session (or the week, if it reset since) first read it; null until then. */
       weekStart: UsageLimit | null
+      /** The graph's update while it runs, or null. */
+      graphJob: GraphJob | null
     }
   }
 }

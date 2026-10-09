@@ -5,13 +5,14 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { GithubFlow, GithubPlan, ProjectScripts, ScriptRun, UsageLimit } from '../types'
+import type { GithubFlow, GithubPlan, GraphJob, ProjectScripts, ScriptRun, UsageLimit } from '../types'
 
 const project = atom({ plugin: 'claudify', key: 'project' } as const, { pm: 'npm', names: [], graphify: null, graphStale: false, github: null, branch: null, ponytail: null, git: true, pending: false })
 const runs = atom({ plugin: 'claudify', key: 'runs' } as const, {})
 const github = atom({ plugin: 'claudify', key: 'github' } as const, { phase: 'idle', plan: 'push', log: [] })
 const limits = atom({ plugin: 'claudify', key: 'limits' } as const, [])
 const weekStart = atom({ plugin: 'claudify', key: 'weekStart' } as const, null)
+const graphJob = atom({ plugin: 'claudify', key: 'graphJob' } as const, null)
 
 // ——— The project: the "dev" and "start" buttons and the checks ———
 
@@ -26,14 +27,90 @@ const ANSI = new RegExp(String.fromCharCode(27) + '\\[[0-9;?]*[A-Za-z]', 'g')
  * The session folder's project: the package.json scripts that get a button and the package manager (by its
  * lockfile), the graphify graph, and the GitHub repository of the `origin` remote.
  */
-/** The message the Setup Project button sends: it asks for what the project's checks still miss. */
-function setupPrompt(p: ProjectScripts): string {
-  const todo = [
-    ...(p.github ? [] : ['publish it to a new private GitHub repository (git init if needed, then gh repo create --private --source . --push)']),
-    ...(p.graphify ? [] : ['build the graphify knowledge graph of this project (/graphify) and add graphify-out/ to .gitignore (create the file if it is missing)']),
-    ...(p.ponytail ? [] : ['install the Ponytail plugin (/plugin install ponytail@ponytail)']),
-  ]
-  return `Set up this project: ${todo.join(', and ')}.`
+/** The model for what setting up needs a model for: the first commit's message and the graph's docs. */
+const SETUP_MODEL = 'claude-sonnet-5-5'
+
+/**
+ * The Setup Project button, in code: Ponytail on for the project, the graph built, then the GitHub flow (which
+ * waits for the person to confirm). A model runs only for the commit message and for docs the graph needs.
+ */
+async function setupProject($: EngineInterface): Promise<void> {
+  const p = await read($, project)
+  if (!p.ponytail) await enablePonytail($)
+  if (p.graphify === null) await updateGraph($, null)
+  if (!p.github) await prepareGithub($, SETUP_MODEL)
+  await readProject($)
+}
+
+/** Turns Ponytail on in the project's own settings (.claude/settings.json), keeping what is there. */
+async function enablePonytail($: EngineInterface): Promise<void> {
+  const file = `${await $.session.cwd()}/.claude/settings.json`
+  let settings: Record<string, unknown> = {}
+  try {
+    settings = JSON.parse(await $.fs.read(file)) as Record<string, unknown>
+  } catch {
+    // No project settings yet.
+  }
+  const enabled = { ...((settings.enabledPlugins as Record<string, unknown> | undefined) ?? {}), 'ponytail@ponytail': true }
+  await $.fs.write(file, JSON.stringify({ ...settings, enabledPlugins: enabled }, null, 2) + '\n')
+  $.ui.toast('Ponytail is on for this project: /reload-plugins loads it.')
+}
+
+/** Files graphify reads with a model (docs, papers); code it reads alone. */
+// shortcut: images and other media graphify also reads are left out; add them when a project needs them.
+const DOC_FILE = /\.(md|mdx|txt|rst|pdf)$/i
+
+/**
+ * Builds or updates the graph: `graphify update` reads the code with no model; only docs changed since
+ * `since` (every doc, on a first build) go to Sonnet, as a subagent of its own in the background.
+ */
+async function updateGraph($: EngineInterface, since: number | null): Promise<void> {
+  await update($, graphJob, (): GraphJob => ({ text: 'Updating the graph from the code…' }))
+  if (since === null) await ignoreGraphOutput($)
+  const built = await sh($, ['graphify', 'update', '.'], undefined, 600_000)
+  if (built.exitCode !== 0) {
+    await update($, graphJob, (): GraphJob => ({ text: `graphify update failed: ${(built.stderr.trim().split('\n').pop() ?? '').slice(0, 160)}`, isError: true }))
+    return
+  }
+  const listed = since === null ? await sh($, ['git', 'ls-files']) : await sh($, ['git', 'log', `--since=@${Math.floor(since / 1000)}`, '--name-only', '--format='])
+  const docs = [...new Set(listed.stdout.split('\n').map(f => f.trim()))].filter(f => DOC_FILE.test(f) && !f.startsWith('graphify-out/'))
+  if (!docs.length) {
+    await update($, graphJob, () => null)
+    await readProject($)
+    return
+  }
+  const spawned = await $.agent
+    .spawn({
+      subagentType: 'claudify:graph-docs',
+      description: 'Add docs to the graph',
+      prompt: `The code part of this project's graphify graph is already up to date. Add these docs to it with the graphify skill (/graphify . --update), extracting them yourself since you cannot dispatch subagents:\n${docs.slice(0, 200).join('\n')}`,
+    })
+    .catch((err: unknown) => ({ deny: String(err) }))
+  if (!('agentId' in spawned) || !spawned.agentId) {
+    await update($, graphJob, (): GraphJob => ({ text: `Could not start Sonnet for the docs: ${'deny' in spawned ? String(spawned.deny) : 'no agent'}`, isError: true }))
+    return
+  }
+  const agentId = spawned.agentId
+  await update($, graphJob, (): GraphJob => ({ text: `Code done; Sonnet is adding ${docs.length} doc${docs.length === 1 ? '' : 's'} to the graph…`, agentId }))
+  await readProject($)
+}
+
+/** Adds graphify-out/ to .gitignore (creating it) unless it is there. */
+async function ignoreGraphOutput($: EngineInterface): Promise<void> {
+  const file = `${await $.session.cwd()}/.gitignore`
+  const text = await $.fs.read(file).catch(() => '')
+  if (/^\/?graphify-out\/?\s*$/m.test(text)) return
+  await $.fs.write(file, `${text}${text && !text.endsWith('\n') ? '\n' : ''}graphify-out/\n`)
+}
+
+/** The subagent that adds docs to the graph: Sonnet 5.5 at medium effort, kept from the model's own Agent tool. */
+const GRAPH_DOCS_AGENT = {
+  name: 'graph-docs',
+  description: "Adds a project's changed docs to its graphify knowledge graph.",
+  prompt:
+    "You keep a project's graphify knowledge graph up to date. Use the graphify skill's --update flow on the current folder. The code part is already done; extract the docs you are given yourself, following the skill's extraction spec, then finish the update (merge, cluster, label, report, html, manifest). Touch nothing outside graphify-out/. End with one line: the graph's nodes and edges and what changed.",
+  model: SETUP_MODEL,
+  effort: 'medium',
 }
 
 async function readProject($: EngineInterface): Promise<void> {
@@ -153,13 +230,13 @@ async function stopScript($: EngineInterface, name: string): Promise<void> {
 
 // ——— The GitHub button: create the repo, publish it, or just commit and push ———
 
-/** The model that writes the commit message (always Haiku 5.5 at medium effort). */
+/** The model that writes the commit message for Save Changes (Haiku 5.5 at medium effort; Setup Project uses Sonnet). */
 const COMMIT_MODEL = 'claude-haiku-5-5'
 const DIFF_CHARS = 24_000
 
 /** Runs git or gh in the session folder; resolves the result, or a failed one when it cannot start. */
-async function sh($: EngineInterface, argv: string[], stdin?: string) {
-  return $.process.run(argv, { timeoutMs: 120_000, ...(stdin !== undefined ? { stdin } : {}) }).catch((err: unknown) => ({ exitCode: -1, stdout: '', stderr: String(err) }))
+async function sh($: EngineInterface, argv: string[], stdin?: string, timeoutMs = 120_000) {
+  return $.process.run(argv, { timeoutMs, ...(stdin !== undefined ? { stdin } : {}) }).catch((err: unknown) => ({ exitCode: -1, stdout: '', stderr: String(err) }))
 }
 
 /** A safe GitHub repository name from the session folder's name. */
@@ -171,9 +248,9 @@ async function repoName($: EngineInterface): Promise<string> {
 
 /**
  * Step 1 of the button: works out what it will do (create, publish or push), gathers what changed and has
- * Haiku write the commit message, then waits for the person to confirm.
+ * the model (Haiku, or Sonnet when setting up) write the commit message, then waits for the person to confirm.
  */
-async function prepareGithub($: EngineInterface): Promise<void> {
+async function prepareGithub($: EngineInterface, model = COMMIT_MODEL): Promise<void> {
   await update($, github, (): GithubFlow => ({ phase: 'preparing', plan: 'push', log: [] }))
   const isRepo = (await sh($, ['git', 'rev-parse', '--is-inside-work-tree'])).stdout.trim() === 'true'
   const remotes = isRepo ? (await sh($, ['git', 'remote', '-v'])).stdout : ''
@@ -201,7 +278,7 @@ async function prepareGithub($: EngineInterface): Promise<void> {
   let message = ''
   if (files) {
     const reply = await $.model.complete({
-      model: COMMIT_MODEL,
+      model,
       effort: 'medium',
       maxTokens: 400,
       system:
@@ -210,7 +287,7 @@ async function prepareGithub($: EngineInterface): Promise<void> {
     })
     message = reply.isAnswered ? reply.text.trim().replace(/^```\w*\n?|```$/g, '').trim() : ''
     if (!message) {
-      await update($, github, (): GithubFlow => ({ phase: 'error', plan, log: [`Haiku did not write a message (${reply.isAnswered ? 'empty reply' : reply.reason}).`] }))
+      await update($, github, (): GithubFlow => ({ phase: 'error', plan, log: [`The model did not write a message (${reply.isAnswered ? 'empty reply' : reply.reason}).`] }))
       return
     }
   }
@@ -269,7 +346,7 @@ const BAR = 8
  * off); on the right a dot for each check (GitHub, graphify, Ponytail) and the 5-hour and weekly limit
  * bars; then what the scripts and the GitHub flow report.
  */
-function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns: Record<string, ScriptRun>, gh: GithubFlow, usage: UsageLimit[], base: UsageLimit | null) {
+function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns: Record<string, ScriptRun>, gh: GithubFlow, usage: UsageLimit[], base: UsageLimit | null, job: GraphJob | null) {
   const { Box, Button, Text } = ui
   // Start Project runs the dev script, or the start script when there is no dev.
   const mainScript = proj.names.includes('dev') ? 'dev' : proj.names.includes('start') ? 'start' : (proj.names[0] ?? null)
@@ -290,11 +367,11 @@ function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns:
   )
   // Setup Project leaves once GitHub, graphify and Ponytail are all on.
   const setupButton = (!proj.github || !proj.graphify || !proj.ponytail) && (
-    <Button key="project:setup" variant="secondary" label="⚙ Setup Project" onPress={() => void $.prompt.submit({ text: setupPrompt(proj) })} />
+    <Button key="project:setup" variant="secondary" label="⚙ Setup Project" onPress={() => void setupProject($)} />
   )
   // Update Graph is there while commits newer than the graph wait to go into it.
-  const graphButton = proj.graphStale && (
-    <Button key="graphify:update" variant="secondary" label="↻ Update Graph" onPress={() => void $.prompt.submit({ text: 'Update the graphify knowledge graph of this project with the files changed since it was built (/graphify . --update).' })} />
+  const graphButton = proj.graphStale && !job && (
+    <Button key="graphify:update" variant="secondary" label="↻ Update Graph" onPress={() => void updateGraph($, proj.graphify)} />
   )
   // The checks: a filled green dot when it is on, a hollow dim one when it is not, a yellow one when out of date.
   const checks = [
@@ -358,7 +435,12 @@ function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns:
         </Box>
       )
     })}
-    {gh.phase === 'preparing' && <Text dimColor>Haiku is writing the commit message…</Text>}
+    {job && (
+      <Text dimColor={!job.isError} color={job.isError ? 'error' : undefined} wrap="truncate-end">
+        {job.text}
+      </Text>
+    )}
+    {gh.phase === 'preparing' && <Text dimColor>Writing the commit message…</Text>}
     {gh.phase === 'confirm' && (
       <Box flexDirection="column">
         <Text>
@@ -400,6 +482,7 @@ export const register: Register = on => {
     if (usage) await setLimits($, usage.rateLimits)
     // The project's checks stay current: a new graph, a plugin enabled or a new remote shows within 10 s.
     $.clock.every(10_000, () => void readProject($).catch(() => undefined))
+    await $.agent.register(GRAPH_DOCS_AGENT).catch(() => undefined)
     return started
   })
 
@@ -412,8 +495,12 @@ export const register: Register = on => {
     const gh = await read($, github)
     const usage = await read($, limits)
     const base = await read($, weekStart)
-    return <Box flexDirection="column">{actionBar($, $.ui.resolve(e), proj, scriptRuns, gh, usage, base)}</Box>
+    const job = await read($, graphJob)
+    return <Box flexDirection="column">{actionBar($, $.ui.resolve(e), proj, scriptRuns, gh, usage, base, job)}</Box>
   })
+
+  // The graph's docs agent is the band's alone: the model's Agent tool does not offer it.
+  on('agent.offer', { agent: 'claudify:graph-docs' }, () => ({ isOffered: false }))
 
   // The limit bars follow the windows as the engine measures them.
   on('session.measure', async ($, e, next) => {
@@ -432,6 +519,9 @@ export const register: Register = on => {
   // When the turn ends, the project is read again (a graph built, a plugin installed).
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
+    // Sonnet finished the graph's docs: its line goes.
+    const job = await read($, graphJob)
+    if (job?.agentId && e.agentId === job.agentId) await update($, graphJob, () => null)
     await readProject($)
     return done
   })
