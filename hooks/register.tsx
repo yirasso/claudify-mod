@@ -7,7 +7,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { GithubFlow, GithubPlan, GraphJob, ProjectScripts, ScriptRun, StartCommand, UsageLimit } from '../types'
 
-const project = atom({ plugin: 'claudify', key: 'project' } as const, { start: null, graphify: null, graphStale: false, github: null, branch: null, ponytail: null, git: true, pending: false, behind: 0 })
+const project = atom({ plugin: 'claudify', key: 'project' } as const, { start: null, install: null, graphify: null, graphStale: false, github: null, branch: null, ponytail: null, git: true, pending: false, behind: 0 })
 const runs = atom({ plugin: 'claudify', key: 'runs' } as const, {})
 const github = atom({ plugin: 'claudify', key: 'github' } as const, { phase: 'idle', plan: 'push', log: [] })
 const limits = atom({ plugin: 'claudify', key: 'limits' } as const, [])
@@ -195,6 +195,35 @@ async function ignoreGraphOutput($: EngineInterface): Promise<void> {
 }
 
 /**
+ * The install a project needs: its manifest or lockfile is newer than what was installed (node_modules' own
+ * record of the last install, or .venv for uv), or nothing is installed yet. Returns the command, or null.
+ */
+async function installCommand($: EngineInterface, cwd: string): Promise<string | null> {
+  const mtime = async (file: string) => (await $.fs.stat(`${cwd}/${file}`).catch(() => null))?.mtimeMs ?? null
+  if ((await mtime('package.json')) !== null) {
+    const locks: [string, string, string][] = [
+      ['pnpm-lock.yaml', 'pnpm install', 'node_modules/.modules.yaml'],
+      ['yarn.lock', 'yarn install', 'node_modules/.yarn-integrity'],
+      ['bun.lock', 'bun install', 'node_modules'],
+      ['bun.lockb', 'bun install', 'node_modules'],
+      ['package-lock.json', 'npm install', 'node_modules/.package-lock.json'],
+    ]
+    let found = locks[locks.length - 1] as [string, string, string]
+    for (const l of locks) if ((await mtime(l[0])) !== null) { found = l; break }
+    const [lock, cmd, record] = found
+    const installed = (await mtime(record)) ?? (await mtime('node_modules'))
+    const changed = Math.max((await mtime('package.json')) ?? 0, (await mtime(lock)) ?? 0)
+    if (installed === null || changed > installed) return cmd
+  }
+  const uvLock = await mtime('uv.lock')
+  if (uvLock !== null) {
+    const venv = await mtime('.venv')
+    if (venv === null || uvLock > venv) return 'uv sync'
+  }
+  return null
+}
+
+/**
  * The session folder's project: what Start Project runs, the graphify graph, the GitHub repository of the
  * `origin` remote and how the branch stands against it, and whether Ponytail is on.
  */
@@ -202,6 +231,7 @@ async function readProject($: EngineInterface): Promise<void> {
   // graphify: graphify-out/graph.json in the session folder (its date says when the graph was built).
   const cwd = await $.session.cwd().catch(() => '.')
   const start = await startCommand($, cwd)
+  const install = await installCommand($, cwd)
   const outDir = `${cwd}/graphify-out`
   const graph = (await $.fs.list(outDir).catch(() => [])).find(x => x.name === 'graph.json' && x.kind === 'file')
   // GitHub: the origin remote points at a github.com repository.
@@ -237,7 +267,7 @@ async function readProject($: EngineInterface): Promise<void> {
   const codeStale = graphify !== null && isRepo && (await git('log', `--since=@${Math.floor(graphify / 1000)}`, '--format=%H', '--', '.', ':(exclude)graphify-out', ':(exclude).gitignore')) !== ''
   const docsWaiting = graphify !== null && Number((await $.fs.read(`${cwd}/${DOCS_SINCE}`).catch(() => '')).trim()) > 0
   const graphStale = codeStale || docsWaiting
-  await update($, project, () => ({ start, graphify, graphStale, github: repo, branch, ponytail, git: isRepo, pending, behind }))
+  await update($, project, () => ({ start, install, graphify, graphStale, github: repo, branch, ponytail, git: isRepo, pending, behind }))
 }
 
 /** Keeps the rate-limit windows the band draws. */
@@ -469,6 +499,15 @@ const LIMITS = [
 ] as const
 const BAR = 8
 
+/** A time left, short: 40m, 2h10m, 3d4h. */
+function untilReset(ms: number): string {
+  const m = Math.ceil(ms / 60_000)
+  if (m < 60) return `${m}m`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h${m % 60 ? `${m % 60}m` : ''}`
+  return `${Math.floor(h / 24)}d${h % 24 ? `${h % 24}h` : ''}`
+}
+
 /**
  * The band above the prompt: on the left the actions as real buttons with a symbol in front of the label
  * (Start/Stop Project; Save Changes while something waits to go to GitHub; Setup Project while a check is
@@ -502,6 +541,11 @@ function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns:
   const graphButton = proj.graphStale && (!job || job.isError) && (
     <Button key="graphify:update" variant="secondary" label="↻ Update Graph" onPress={() => void updateGraph($)} />
   )
+  // Install deps is there while the manifest or lockfile is newer than the last install (a pull brought new ones).
+  const installCmd = proj.install
+  const installButton = installCmd && scriptRuns.install?.status !== 'running' && scriptRuns.install?.status !== 'stopping' && (
+    <Button key="script:install" variant="secondary" label="⬇ Install deps" onPress={() => void runScript($, 'install', installCmd).then(() => readProject($))} />
+  )
   // Pull is there while GitHub has commits the branch does not, and not while the GitHub flow runs.
   const pullButton = proj.behind > 0 && (gh.phase === 'idle' || gh.phase === 'done' || gh.phase === 'error') && (
     <Button key="github:pull" variant="secondary" label={`↓ Pull (${proj.behind})`} onPress={() => void pullChanges($)} />
@@ -519,7 +563,9 @@ function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns:
     if (!l) return []
     const used = l.resetsAt && Date.parse(l.resetsAt) <= now ? 0 : Math.max(0, Math.min(100, l.percentUsed))
     const full = Math.round((used / 100) * BAR)
-    return [{ label, used, bar: '█'.repeat(full) + '░'.repeat(BAR - full) }]
+    // From 70% on, how long until the window resets.
+    const left = used >= 70 && l.resetsAt ? Date.parse(l.resetsAt) - now : 0
+    return [{ label, used, bar: '█'.repeat(full) + '░'.repeat(BAR - full), resets: left > 0 ? ` · ${untilReset(left)}` : '' }]
   })
   // How much of the week this session has used: the weekly reading less the one it started from.
   const week = usage.find(x => x.kind === 'seven_day')
@@ -529,6 +575,7 @@ function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns:
       <Box flexDirection="row" justifyContent="space-between" gap={1} flexWrap="wrap">
         <Box flexDirection="row" gap={1}>
           {startButton}
+          {installButton}
           {pullButton}
           {saveButton}
           {setupButton}
@@ -542,7 +589,7 @@ function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns:
           ))}
           {bars.map(b => (
             <Text color={b.used >= 90 ? 'error' : b.used >= 70 ? 'warning' : undefined}>
-              {`${b.label} ${b.bar} ${Math.round(b.used)}%`}
+              {`${b.label} ${b.bar} ${Math.round(b.used)}%${b.resets}`}
             </Text>
           ))}
           {session !== null && <Text dimColor>{`Session +${Number(session.toFixed(1))}%`}</Text>}

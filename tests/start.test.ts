@@ -116,3 +116,47 @@ test('Pull: shown while GitHub is ahead; pulls, then the code graph follows with
   expect(await ui.find({ key: 'github:pull' })).toBeUndefined()
   expect(await ui.find({ key: 'graphify:update' })).toBeTruthy()
 })
+
+for (const stale of [true, false]) {
+  test(`Install deps only while the lockfile is newer than the last install (${stale ? 'newer' : 'installed'})`, async ($, on) => {
+    const mtimes: Record<string, number> = { 'package.json': 100, 'package-lock.json': stale ? 300 : 150, 'node_modules/.package-lock.json': 200, node_modules: 200 }
+    on('fs.read', async () => ({ value: JSON.stringify({ scripts: { dev: 'vite' } }) }))
+    on('fs.exists', async () => ({ value: false }))
+    on('fs.stat', async (_$: unknown, e: { path: string }) => {
+      const rel = e.path.replace(/\\/g, '/').replace(/^C:\/Dev\/Nau\//, '')
+      return (rel in mtimes ? { value: { kind: 'file', size: 1, mtimeMs: mtimes[rel], isLink: false } } : { deny: 'ENOENT' }) as never
+    })
+    on('session.cwd', async () => ({ value: 'C:/Dev/Nau' }))
+    on('env.get', async () => ({ value: undefined }))
+    let argv: readonly string[] = []
+    on('process.spawn', async function* (_$: unknown, e: { argv: readonly string[] }) {
+      argv = e.argv
+      return { value: { code: 0, signal: null } }
+    } as never)
+    on('session.usage', async () => ({ value: { startedAt: 0, context: {}, rateLimits: [] } }) as never)
+    on('session.start', async () => ({ cwd: 'C:/Dev/Nau' }) as never)
+
+    await $.session.start({ cwd: 'C:/Dev/Nau', surface: 'desktop', isInteractive: true } as never)
+    const ui = await $.ui.mount({ plugin: 'claudify', surface: 'desktop', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false } as never })
+    expect(!!(await ui.find({ key: 'script:install' }))).toBe(stale)
+    if (!stale) return
+    await ui.press({ key: 'script:install' })
+    expect(argv.join(' ')).toContain('npm install')
+  })
+}
+
+test('from 70% a limit bar says how long until it resets', async ($, on) => {
+  const soon = new Date(Date.now() + 40 * 60_000 - 1000).toISOString()
+  const later = new Date(Date.now() + (2 * 86_400_000 + 5 * 3_600_000 - 1000)).toISOString()
+  on('fs.read', async () => ({ deny: 'ENOENT' }) as never)
+  on('fs.exists', async () => ({ value: false }))
+  on('session.usage', async () => ({ value: { startedAt: 0, context: {}, rateLimits: [{ kind: 'five_hour', percentUsed: 92, resetsAt: soon }, { kind: 'seven_day', percentUsed: 40, resetsAt: later }] } }) as never)
+  on('session.start', async () => ({ cwd: 'C:/Dev/Nau' }) as never)
+
+  await $.session.start({ cwd: 'C:/Dev/Nau', surface: 'desktop', isInteractive: true } as never)
+  const ui = await $.ui.mount({ plugin: 'claudify', surface: 'desktop', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false } as never })
+  const shown = (await ui.findAll({ type: 'Text' })).map(t => t.text).join('\n')
+  expect(shown).toContain('5h ███████░ 92% · 40m')
+  // Under 70%: no countdown.
+  expect(shown).toContain('Week ███░░░░░ 40%\n')
+})
