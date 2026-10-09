@@ -8,9 +8,12 @@ A Claude Code plugin that adds a band above the prompt with the project's action
 - **Save Changes (N)**: shown only while there is something to send to GitHub, with the number of files; it stands out past 15 files or two hours after the last commit. Afterwards **↶ Undo** reverts that commit for 10 seconds. Creates or publishes the GitHub repo, or commits and pushes. The commit message is written by Claude Haiku, and nothing runs until you confirm it.
 - **Setup Project**: shown only while something is missing. In code: turns [Ponytail](https://github.com/dietrichgebert/ponytail) on for the project, builds the graphify graph (adding `graphify-out/` to `.gitignore`) and starts the GitHub flow. Claude Sonnet only writes the first commit message and reads the docs for the graph.
 - **The graph follows the work by itself**: after each turn in which Claude changed code, `graphify update` puts it in (no model); graphify's git hook (installed for you) rebuilds the code after each commit, and the docs a commit changed then go to Claude Sonnet with no button. **Update Graph** stays for whatever is left out of date (a yellow graphify dot).
+- **Types**: after each turn in which Claude changed code, the project's typecheck runs (`tsc --noEmit` with a local TypeScript, or `cargo check`); a red **● Types** shows the first errors and **✦ Send type errors to Claude**.
 - On the right, the branch (**⎇ name**) when it is not `main`, then **GitHub · graphify · Ponytail**: a green dot (●) when each is on (an `origin` remote on GitHub, a non-empty graphify graph, the Ponytail plugin enabled), a dim hollow one (○) when not, a yellow one when the graph is out of date. Then the **5h** and **Week** limit bars (from 70%, with the time until they reset) and how much of the week this session used, then **📁** (the project folder), **</>** (VS Code, when installed) and **🔔/🔕** (a short chime when a turn that took over a minute ends).
 
 The pane with the session's skills, MCP servers, connectors and plugins lives in its own plugin, `setup-info`.
+
+To turn Claudify off in a project, type `/claudify off` (and `/claudify on` to bring it back).
 
 ## Install
 

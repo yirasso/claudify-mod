@@ -1,6 +1,6 @@
 # Claudify plugin
 
-A Claude Code plugin (a "mod": function hooks, no MCP server) with one part: the **band above the prompt** with the action buttons on the left (Start/Stop Project; Install deps only while the manifest or lockfile is newer than the last install; Pull only while GitHub is ahead; Save Changes only while something waits to go to GitHub; Setup Project only while GitHub, graphify or Ponytail is off; Update Graph only while commits newer than the graph wait to go into it, with a yellow graphify dot) and, aligned right, the branch when it is not main, a dot for each check (green ● on, dim ○ off) the 5-hour and weekly limit bars (from 70% with the time until they reset) and how much of the week this session used, and three icon buttons: 📁 the folder, </> VS Code (when `code` is installed) and 🔔/🔕 the long-turn sound, and the script output (with Open for its address, Free port when its port was taken, and Send error to Claude when it failed) and the GitHub confirm flow under them.
+A Claude Code plugin (a "mod": function hooks, no MCP server) with one part: the **band above the prompt** with the action buttons on the left (Start/Stop Project; Install deps only while the manifest or lockfile is newer than the last install; Pull only while GitHub is ahead; Save Changes only while something waits to go to GitHub; Setup Project only while GitHub, graphify or Ponytail is off; Update Graph only while commits newer than the graph wait to go into it, with a yellow graphify dot) and, aligned right, the branch when it is not main, a dot for each check (green ● on, dim ○ off) and a Types dot (the typecheck after each turn) the 5-hour and weekly limit bars (from 70% with the time until they reset) and how much of the week this session used, and three icon buttons: 📁 the folder, </> VS Code (when `code` is installed) and 🔔/🔕 the long-turn sound, and the script output (with Open for its address, Free port when its port was taken, and Send error to Claude when it failed) and the GitHub confirm flow under them.
 
 The pane with the session's skills, MCP servers, connectors and plugins moved on 2026-10-09 to its own plugin, `setup-info`, in `C:\Dev\Claude Setup Info`.
 
@@ -15,7 +15,7 @@ The owner is Tomás. He talks in European Portuguese (never Brazilian); the plug
 - **Every change ships.** After each change (the three checks below passing): bump `version`, commit, push to `main`, `claude plugin update claudify@tomas-plugins` and `/reload-plugins`, so Tomás sees it in Claude straight away. No separate HTML mock-up: the UI is designed directly in `hooks/register.tsx`.
 - **Before finishing a change**, all three must pass:
   - `claude plugin validate .`
-  - `claude plugin test .` (33 tests, 6 files)
+  - `claude plugin test .` (35 tests, 7 files)
   - the typecheck: `npx -y -p typescript tsc -p tsconfig.json` (TypeScript is not installed in the repo, so plain `npx tsc` fails), against the API types in `.claude-plugin/types/`. That folder is generated and git-ignored; the plugin-authoring skill regenerates it.
 - **For the API, load the `plugin-authoring` skill** before touching the hooks: it has the full contract.
 
@@ -23,18 +23,21 @@ The owner is Tomás. He talks in European Portuguese (never Brazilian); the plug
 
 - `hooks/hooks.json`: `{ "modules": ["./register.tsx"] }`.
 - `hooks/register.tsx`: every hook.
-  - **Events handled:** `session.start`, `turn.complete`, `ui.render` (`AbovePrompt`), `session.measure` (the limit bars), `session.end`.
+  - **Events handled:** `session.start`, `turn.complete`, `ui.render` (`AbovePrompt`), `session.measure` (the limit bars), `session.end`, `command.run` (`/claudify off|on`).
   - **What it renders:** `AbovePrompt` (the band: `actionBar`).
   - **Its functions:** `readProject` (every 10 s, via `$.clock.every`), `installCommand` (npm/pnpm/yarn/bun install or `uv sync`, by comparing mtimes with the last install's record), `startCommand` (what Start Project runs: a package.json script, Expo, Cargo, Go, Python, Godot), `runScript`/`stopScript`/`killTree`/`freePortAndStart`/`openUrl`/`sendError` (submits the failed command, code and last 40 lines as a prompt), `fetchRemote` (every 5 min)/`pullChanges`, `followTurn` (after a main-thread turn that changed code: the code graph, no model), `followCommits` (a new HEAD: graphify's own post-commit hook, installed by `installGraphHook`, rebuilds the code; the band waits for graph.json to be newer than the commit, then sends that commit's docs to Sonnet with no button), `refreshCodeGraph` (after a push or a pull: the code graph with no model, docs left in `graphify-out/.claudify_docs_since`), `prepareGithub`/`runGithub` (the commit message comes from `$.model.complete` with Haiku 5.5 at medium effort, Sonnet 5.5 when Setup Project calls it, and nothing runs before the user confirms), `setupProject`/`enablePonytail`/`updateGraph`/`addDocs`, `actionBar`.
   - **Setup Project and Update Graph run in code; a model only where code can't:** Ponytail goes on in the project's `.claude/settings.json`, `graphify-out/` into `.gitignore`, `graphify update .` builds the code graph with no model. Only docs (`.md`, `.mdx`, `.txt`, `.rst`) changed since the graph go to Sonnet 5.5 (medium effort) through `$.model.complete` (`addDocs`): their text in batches, with the graphify skill's own extraction spec (`~/.claude/skills/graphify/references/extraction-spec.md`). `scripts/graph_docs.py`, run with graphify's Python, merges the chunks into the graph in code (cache, merge, cluster, community names kept from the old graph, report, html).
 - `types/index.d.ts`: the state contract (`PluginState`). The atoms are `project` (with `pending`: something to send to GitHub), `runs`, `github`, `limits`, `graphJob` (the graph update's line) and `weekStart` (the weekly reading the session started from: «Session +N%» is the week minus it; a weekly reset or `/clear` starts it over).
 - `scripts/graph_docs.py`: merges Sonnet's doc chunks into the graph, run with graphify's Python.
-- `tests/`: `actions`, `checks`, `extras`, `github`, `scripts`, `start`.
+- `tests/`: `actions`, `checks`, `extras`, `github`, `scripts`, `start`, `types`.
 
 ## Behaviour
 
 - **Save Changes** shows the files waiting and turns primary with more than 15 or two hours after the last commit; after it, **↶ Undo** (10 s) reverts the commit and pushes the revert.
 - **A turn over a minute** ends with the done sound (`sounds/done.wav`, a chime generated for the band; PowerShell's SoundPlayer on Windows, `$.audio.play` elsewhere), unless the bell is off (`notify` atom, kept in `$.store`).
+- **The typecheck** (`checkTypes`) runs after each main-thread turn that changed code: `npx --no-install tsc --noEmit` for a tsconfig.json (no download: without a local TypeScript there is no dot), `cargo check` for Cargo. A red dot shows the first errors and `✦ Send N type errors to Claude`.
+- **`/claudify off`** (and `on`) hides the band and stops the automatic work in that project; kept in `$.store` as `off:<folder>`.
+- **Commits and the band are always in English.**
 - **Finished work folds back after 2 s** (`collapseSoon`): the GitHub flow's lines, a graph failure, and runs that ended. A failed run with a button (Send error, Free port) stays.
 
 ## Rules learned the hard way

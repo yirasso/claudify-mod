@@ -5,7 +5,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { GithubFlow, GithubPlan, GraphJob, ProjectScripts, ScriptRun, StartCommand, UsageLimit } from '../types'
+import type { GithubFlow, GithubPlan, GraphJob, ProjectScripts, ScriptRun, StartCommand, TypeCheck, UsageLimit } from '../types'
 
 const project = atom({ plugin: 'claudify', key: 'project' } as const, { start: null, install: null, graphify: null, graphStale: false, github: null, branch: null, ponytail: null, git: true, pending: false, behind: 0, changed: 0, lastCommit: null })
 const runs = atom({ plugin: 'claudify', key: 'runs' } as const, {})
@@ -15,6 +15,8 @@ const weekStart = atom({ plugin: 'claudify', key: 'weekStart' } as const, null)
 const graphJob = atom({ plugin: 'claudify', key: 'graphJob' } as const, null)
 const notify = atom({ plugin: 'claudify', key: 'notify' } as const, true)
 const vscode = atom({ plugin: 'claudify', key: 'vscode' } as const, false)
+const types = atom({ plugin: 'claudify', key: 'types' } as const, null)
+const off = atom({ plugin: 'claudify', key: 'off' } as const, false)
 
 // ——— The project: what Start Project runs, and the checks ———
 
@@ -516,6 +518,58 @@ async function openEditor($: EngineInterface): Promise<void> {
   else await sh($, ['code', cwd])
 }
 
+// ——— The typecheck after each turn that changed code ———
+
+/** The project's typecheck: tsc for a tsconfig.json (only a local install: no download), cargo check for Cargo. */
+async function typecheckCommand($: EngineInterface, cwd: string): Promise<string[] | null> {
+  const windows = (await $.env.get('OS')) === 'Windows_NT'
+  if (await $.fs.exists(`${cwd}/tsconfig.json`).catch(() => false)) return [...(windows ? ['cmd', '/c'] : []), 'npx', '--no-install', 'tsc', '--noEmit', '-p', '.']
+  if (await $.fs.exists(`${cwd}/Cargo.toml`).catch(() => false)) return ['cargo', 'check', '--quiet', '--message-format', 'short']
+  return null
+}
+
+/** The working tree's code changes the typecheck last saw (this load only). */
+let lastTypesTree: string | null = null
+
+/**
+ * After a turn that changed code, the typecheck runs in the background (no model): the Types dot goes green or
+ * red, and a red one offers its errors to Claude. A project with no typecheck (or no local tsc) shows no dot.
+ */
+async function checkTypes($: EngineInterface): Promise<void> {
+  if ((await read($, types))?.status === 'running') return
+  const tree = (await sh($, ['git', 'status', '--porcelain'])).stdout
+    .split('\n')
+    .filter(l => l.trim() && !/graphify-out\//.test(l) && !DOC_FILE.test(l.trim()))
+    .join('\n')
+  const before = lastTypesTree
+  lastTypesTree = tree
+  if (before !== null && tree === before) return
+  const cmd = await typecheckCommand($, await $.session.cwd())
+  if (!cmd) return void (await update($, types, () => null))
+  await update($, types, (was): TypeCheck => ({ status: 'running', errors: was?.errors ?? [] }))
+  const r = await sh($, cmd, undefined, 300_000)
+  const out = `${r.stdout}\n${r.stderr}`.replace(ANSI, '').split(/\r?\n/).filter(l => l.trim())
+  // Only real errors count: tsc's "error TS…" and cargo's "error[…]" / "error:"; anything else failing (no local
+  // TypeScript, which npx --no-install refuses to fetch) means no typecheck to show.
+  const isError = (l: string) => /error TS\d+|^\S*:\d+:\d+: error|^error(\[|:)/.test(l)
+  if (r.exitCode !== 0 && !out.some(isError)) return void (await update($, types, () => null))
+  const errors = out.filter(isError).slice(0, TAIL)
+  await update($, types, (): TypeCheck => (r.exitCode === 0 ? { status: 'ok', errors: [] } : { status: 'error', errors }))
+}
+
+/** Sends the typecheck's errors to Claude, asking for a fix. */
+async function sendTypes($: EngineInterface): Promise<void> {
+  const check = await read($, types)
+  if (!check?.errors.length) return
+  const fence = '```'
+  await $.prompt.submit({ text: `The typecheck fails with ${check.errors.length} error${check.errors.length === 1 ? '' : 's'}:\n\n${fence}\n${check.errors.join('\n')}\n${fence}\n\nFix them.` })
+}
+
+/** Whether Claudify is off for this project (`/claudify off`, kept in the store by folder). */
+async function offKey($: EngineInterface): Promise<string> {
+  return `off:${(await $.session.cwd().catch(() => '')).replace(/\\/g, '/').toLowerCase()}`
+}
+
 /** Opens a dev server's address in the default browser. */
 async function openUrl($: EngineInterface, url: string): Promise<void> {
   if ((await $.env.get('OS')) === 'Windows_NT') await sh($, ['rundll32', 'url.dll,FileProtocolHandler', url])
@@ -699,7 +753,7 @@ function untilReset(ms: number): string {
  * off); on the right a dot for each check (GitHub, graphify, Ponytail) and the 5-hour and weekly limit
  * bars; then what the scripts and the GitHub flow report.
  */
-function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns: Record<string, ScriptRun>, gh: GithubFlow, usage: UsageLimit[], base: UsageLimit | null, job: GraphJob | null, notifyOn: boolean, hasVscode: boolean) {
+function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns: Record<string, ScriptRun>, gh: GithubFlow, usage: UsageLimit[], base: UsageLimit | null, job: GraphJob | null, notifyOn: boolean, hasVscode: boolean, check: TypeCheck | null) {
   const { Box, Button, Text } = ui
   // Start Project runs what this kind of project runs (startCommand).
   const start = proj.start
@@ -775,6 +829,11 @@ function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns:
               {`${c.on ? '●' : '○'} ${c.label}`}
             </Text>
           ))}
+          {check && (
+            <Text color={check.status === 'ok' ? 'success' : check.status === 'error' ? 'error' : undefined} dimColor={check.status === 'running'}>
+              {`${check.status === 'running' ? '◌' : '●'} Types`}
+            </Text>
+          )}
           {bars.map(b => (
             <Text color={b.used >= 90 ? 'error' : b.used >= 70 ? 'warning' : undefined}>
               {`${b.label} ${b.bar} ${Math.round(b.used)}%${b.resets}`}
@@ -815,6 +874,16 @@ function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns:
         </Box>
       )
     })}
+    {check?.status === 'error' && (
+      <Box flexDirection="column">
+        {check.errors.slice(0, 2).map(line => (
+          <Text color="error" wrap="truncate-end">
+            {line}
+          </Text>
+        ))}
+        <Button key="types:send" variant="secondary" label={`✦ Send ${check.errors.length} type error${check.errors.length === 1 ? '' : 's'} to Claude`} onPress={() => void sendTypes($)} />
+      </Box>
+    )}
     {job && (
       <Text dimColor={!job.isError} color={job.isError ? 'error' : undefined} wrap="truncate-end">
         {job.text}
@@ -868,8 +937,11 @@ export const register: Register = on => {
     const usage = await $.session.usage().catch(() => null)
     if (usage) await setLimits($, usage.rateLimits)
     // The project's checks stay current: a new graph, a plugin enabled or a new remote shows within 10 s.
-    $.clock.every(10_000, () => void readProject($).then(() => followCommits($)).catch(() => undefined))
-    if ((await read($, project)).graphify !== null) void installGraphHook($).catch(() => undefined)
+    const isOff = (await $.store.get(await offKey($)).catch(() => undefined)) === true
+    await update($, off, () => isOff)
+    await $.command.register({ name: 'claudify', description: 'Turn Claudify off or on for this project: /claudify off, /claudify on' }).catch(() => undefined)
+    $.clock.every(10_000, () => void read($, off).then(o => (o ? undefined : readProject($).then(() => followCommits($)))).catch(() => undefined))
+    if (!isOff && (await read($, project)).graphify !== null) void installGraphHook($).catch(() => undefined)
     // What GitHub has: now and every 5 minutes, for the Pull button.
     void fetchRemote($).catch(() => undefined)
     $.clock.every(300_000, () => void fetchRemote($).catch(() => undefined))
@@ -878,7 +950,7 @@ export const register: Register = on => {
 
   // The band above the prompt: the project's actions, always at hand.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    if (e.props.hasSurvey) return next(e)
+    if (e.props.hasSurvey || (await read($, off))) return next(e)
     const { Box } = $.ui.resolve(e)
     const proj = await read($, project)
     const scriptRuns = await read($, runs)
@@ -888,7 +960,20 @@ export const register: Register = on => {
     const job = await read($, graphJob)
     const notifyOn = await read($, notify)
     const hasVscode = await read($, vscode)
-    return <Box flexDirection="column">{actionBar($, $.ui.resolve(e), proj, scriptRuns, gh, usage, base, job, notifyOn, hasVscode)}</Box>
+    const check = await read($, types)
+    return <Box flexDirection="column">{actionBar($, $.ui.resolve(e), proj, scriptRuns, gh, usage, base, job, notifyOn, hasVscode, check)}</Box>
+  })
+
+  // /claudify off hides the band and stops its automatic work in this project; /claudify on brings them back.
+  on('command.run', { command: 'claudify' }, async ($, e) => {
+    const arg = e.args.trim().toLowerCase()
+    if (arg !== 'off' && arg !== 'on') return { text: `Claudify is ${(await read($, off)) ? 'off' : 'on'} for this project. Use /claudify off or /claudify on.` }
+    const turnOff = arg === 'off'
+    await update($, off, () => turnOff)
+    if (turnOff) await $.store.set(await offKey($), true)
+    else await $.store.delete(await offKey($)).catch(() => undefined)
+    if (!turnOff) await readProject($)
+    return { text: turnOff ? 'Claudify is off for this project: no band, and nothing runs by itself. /claudify on brings it back.' : 'Claudify is on for this project.' }
   })
 
   // The limit bars follow the windows as the engine measures them.
@@ -909,8 +994,11 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
     await readProject($)
-    // The main thread's turn only: the code it changed goes into the graph, and a commit it made brings its docs.
-    if (e.agentId === undefined) void followCommits($).then(() => followTurn($)).catch(() => undefined)
+    // The main thread's turn only: the code it changed goes into the graph (a commit brings its docs) and is typechecked.
+    if (e.agentId === undefined && !(await read($, off))) {
+      void followCommits($).then(() => followTurn($)).catch(() => undefined)
+      void checkTypes($).catch(() => undefined)
+    }
     // A turn over a minute long ends with the done sound, so the person can do something else meanwhile.
     if (e.agentId === undefined && e.durationMs > 60_000 && (await read($, notify))) void playDone($).catch(() => undefined)
     return done

@@ -45,6 +45,9 @@ export type GithubFlow = {
 /** The graph being built or updated: the line the band shows, and whether it is a failure. */
 export type GraphJob = { text: string; isError?: boolean }
 
+/** The typecheck after a turn: running, passing, or failing with its error lines. */
+export type TypeCheck = { status: 'running' | 'ok' | 'error'; errors: string[] }
+
 declare module 'claude-code' {
   interface PluginState {
     'claudify': {
@@ -64,6 +67,10 @@ declare module 'claude-code' {
       notify: boolean
       /** Whether VS Code's `code` command is installed (the </> button shows only then). */
       vscode: boolean
+      /** The typecheck's last result, or null where the project has none. */
+      types: TypeCheck | null
+      /** Whether Claudify is off for this project (/claudify off). */
+      off: boolean
     }
   }
 }
