@@ -92,8 +92,8 @@ test('the bell turns the done sound for long turns on and off, and the folder an
   expect(await ui.find({ key: 'project:editor' })).toBeTruthy()
   await ui.press({ key: 'project:folder' })
   await ui.press({ key: 'project:editor' })
-  // The folder opens through the shell's FileProtocolHandler (explorer.exe never showed a window).
-  expect(ran).toContain('rundll32.exe url.dll,FileProtocolHandler C:\\Dev\\Nau')
+  // The folder opens through scripts/open_folder.ps1, which lifts the window above Claude.
+  expect(ran.some(c => c.includes('open_folder.ps1 -Path C:\\Dev\\Nau'))).toBe(true)
   expect(ran).toContain('cmd /c code C:/Dev/Nau')
 })
 

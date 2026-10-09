@@ -517,9 +517,11 @@ async function toggleNotify($: EngineInterface): Promise<void> {
 /** Opens the session folder in the file manager. */
 async function openFolder($: EngineInterface): Promise<void> {
   const cwd = await $.session.cwd()
-  // explorer.exe started by the engine never shows a window (tried run, spawn and Invoke-Item); the shell's own
-  // FileProtocolHandler, the one ↗ Open uses, opens the folder and returns at once.
-  if ((await $.env.get('OS')) === 'Windows_NT') await sh($, ['rundll32.exe', 'url.dll,FileProtocolHandler', cwd.replace(/\//g, '\\')])
+  // A window opened from the engine stays behind the others (Windows' foreground lock): scripts/open_folder.ps1
+  // reuses the folder's window or opens one, and lifts it to the front.
+  if ((await $.env.get('OS')) === 'Windows_NT') {
+    await sh($, ['powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', `${$.plugin.root}/scripts/open_folder.ps1`.replace(/\//g, '\\'), '-Path', cwd.replace(/\//g, '\\')])
+  }
   else if ((await sh($, ['open', cwd])).exitCode !== 0) await sh($, ['xdg-open', cwd])
 }
 
