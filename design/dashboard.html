@@ -48,11 +48,15 @@
   }
   .mark { position: absolute; left: 50%; top: 20px; transform: translateX(-50%); width: 40px; height: 40px; border-radius: 50%; background: #000; display: grid; place-items: center; }
   .mark svg { width: 24px; height: 24px; }
-  .btns { position: absolute; left: 0; right: 0; bottom: 16px; display: grid; grid-template-columns: repeat(4, 1fr); padding: 0 18px; }
-  .btn { display: grid; justify-items: center; gap: 8px; font-size: 12px; color: #d9d9d9; letter-spacing: .3px; }
-  .btn .sq { width: 54px; height: 54px; border-radius: 15px; background: var(--tile-hi); display: grid; place-items: center; }
-  .btn.run .sq { background: var(--ink); }
-  .btn.run .sq svg { stroke: #111; }
+  .btns { position: absolute; left: 0; right: 0; bottom: 16px; display: grid; grid-template-columns: repeat(3, 1fr); padding: 0 18px; }
+  .btn { display: grid; justify-items: center; gap: 9px; font-size: 12px; color: #dcdcdc; letter-spacing: .7px; cursor: pointer; }
+  .btn .sq {
+    width: 50px; height: 50px; border-radius: 14px; background: #3a3a3a;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .07);
+    display: grid; place-items: center; transition: background .12s;
+  }
+  .btn:hover .sq { background: #454545; }
+  .btn .sq svg { width: 23px; height: 23px; stroke: #ececec; stroke-width: 1.5; }
 
   /* ── Usage: ring gauges ── */
   .usage { height: 188px; }
@@ -134,10 +138,12 @@
     <div class="dots"></div>
     <div class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"><path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6L5.6 18.4"/></svg></div>
     <div class="btns">
-      <div class="btn"><div class="sq"><svg class="i" viewBox="0 0 24 24"><path d="M8 5l11 7-11 7z"/></svg></div>npm dev</div>
-      <div class="btn"><div class="sq"><svg class="i" viewBox="0 0 24 24"><path d="M5 4v16M5 4h9a4 4 0 010 8H5"/></svg></div>npm start</div>
-      <div class="btn"><div class="sq"><svg class="i" viewBox="0 0 24 24"><path d="M12 3a9 9 0 00-2.8 17.5c.5.1.7-.2.7-.5v-1.7c-2.5.6-3-1.2-3-1.2-.4-1-1-1.3-1-1.3-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.5 2.3 1.1 2.8.8.1-.6.3-1.1.6-1.3-2-.2-4.1-1-4.1-4.4 0-1 .4-1.8 1-2.4-.1-.2-.4-1.2.1-2.4 0 0 .8-.2 2.5 1a8.700 8.700 0 014.600 0c1.700-1.200 2.500-1 2.500-1 .5 1.200.2 2.200.1 2.400.6.600 1 1.400 1 2.400 0 3.400-2.100 4.200-4.100 4.400.3.300.6.800.6 1.600V20c0 .3.200.600.700.500A9 9 0 0012 3z"/></svg></div>GitHub</div>
-      <div class="btn"><div class="sq"><svg class="i" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></svg></div>Stop</div>
+      <!-- Start Project: runs the dev script (turns into Stop Project while it runs) -->
+      <div class="btn"><div class="sq"><svg class="i" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="5"/><path d="M10 8.600l5.200 3.400-5.200 3.400z"/></svg></div>Start Project</div>
+      <!-- Save Changes: commit and push (publishes the repo first when there is none) -->
+      <div class="btn"><div class="sq"><svg class="i" viewBox="0 0 24 24"><path d="M5 5.500A1.500 1.500 0 016.500 4h9.200l3.300 3.300v10.200a1.500 1.500 0 01-1.500 1.500h-11A1.500 1.500 0 015 17.500z"/><path d="M8.500 4v4.500h6V4M8.500 19v-5h7v5"/></svg></div>Save Changes</div>
+      <!-- Setup Project: the missing checks (graph, GitHub, Ponytail) -->
+      <div class="btn"><div class="sq"><svg class="i" viewBox="0 0 24 24"><path d="M4 7h8M18 7h2M4 12h2M12 12h8M4 17h8M18 17h2"/><circle cx="15" cy="7" r="2.200"/><circle cx="9" cy="12" r="2.200"/><circle cx="15" cy="17" r="2.200"/></svg></div>Setup Project</div>
     </div>
   </section>
 

@@ -8,7 +8,7 @@ import type { ElementConstructor, EngineInterface, Register, RenderChildren, Svg
 
 import { dashboard } from './cards'
 
-import type { GithubFlow, GithubPlan, Limit, ScriptRun, ServerRow, SkillRow } from '../types'
+import type { GithubFlow, GithubPlan, Limit, ProjectScripts, ScriptRun, ServerRow, SkillRow } from '../types'
 
 const PANE = 'claudify'
 const TITLE = 'Claude'
@@ -169,6 +169,15 @@ const ANSI = new RegExp(String.fromCharCode(27) + '\\[[0-9;?]*[A-Za-z]', 'g')
  * The session folder's project: the package.json scripts that get a button and the package manager (by its
  * lockfile), the graphify graph, and the GitHub repository of the `origin` remote.
  */
+/** The message the Setup Project button sends: it asks for what the project's checks still miss (GitHub is the Save Changes button's). */
+function setupPrompt(p: ProjectScripts): string {
+  const todo = [
+    ...(p.graphify ? [] : ['build the graphify knowledge graph of this project (/graphify)']),
+    ...(p.ponytail ? [] : ['install the Ponytail plugin (/plugin install ponytail@ponytail)']),
+  ]
+  return `Set up this project: ${todo.join(', and ')}.`
+}
+
 async function readProject($: EngineInterface): Promise<void> {
   let names: string[] = []
   try {
@@ -655,6 +664,9 @@ export const register: Register = on => {
           { text: '.' },
         ]
       : [{ text: 'No GitHub repository yet. ' }, { text: proj.git === false ? 'Create one' : 'Publish this repo', bold: true }, { text: ' with the button below.' }]
+    // Start Project runs the dev script, or the start script when there is no dev.
+    const mainScript = proj.names.includes('dev') ? 'dev' : proj.names.includes('start') ? 'start' : (proj.names[0] ?? null)
+    const mainRun = mainScript ? scriptRuns[mainScript] : undefined
     const runningScripts = Object.values(scriptRuns).filter(r => r.status === 'running').length
 
     return (
@@ -730,24 +742,23 @@ export const register: Register = on => {
         {/* The actions, one row: the project's scripts and the GitHub button. */}
         <Box flexDirection="column">
           <Box flexDirection="row" gap={1} flexWrap="wrap">
-            {proj.names.map(name => {
-              const run = scriptRuns[name]
-              const going = run?.status === 'running'
-              return (
-                <Button
-                  key={`script:${name}`}
-                  variant={going ? 'secondary' : 'primary'}
-                  label={run?.status === 'stopping' ? `Stopping ${name}…` : going ? `Stop ${name}` : `${proj.pm} ${proj.pm === 'npm' && name === 'start' ? 'start' : `run ${name}`}`}
-                  onPress={() => void (going ? stopScript($, name) : run?.status === 'stopping' ? undefined : runScript($, name))}
-                />
-              )
-            })}
-            {(gh.phase === 'idle' || gh.phase === 'done' || gh.phase === 'error') && (
+            {mainScript && (
               <Button
-                key="github:start"
+                key={`script:${mainScript}`}
+                variant={mainRun?.status === 'running' ? 'secondary' : 'primary'}
+                label={mainRun?.status === 'stopping' ? 'Stopping…' : mainRun?.status === 'running' ? 'Stop Project' : 'Start Project'}
+                onPress={() => void (mainRun?.status === 'running' ? stopScript($, mainScript) : mainRun?.status === 'stopping' ? undefined : runScript($, mainScript))}
+              />
+            )}
+            {(gh.phase === 'idle' || gh.phase === 'done' || gh.phase === 'error') && (
+              <Button key="github:start" variant="secondary" label="Save Changes" onPress={() => void prepareGithub($)} />
+            )}
+            {(!proj.graphify || !proj.ponytail) && (
+              <Button
+                key="project:setup"
                 variant="secondary"
-                label={proj.git === false ? 'Create GitHub repo & push' : !proj.github ? 'Publish to GitHub & push' : 'Commit & push'}
-                onPress={() => void prepareGithub($)}
+                label="Setup Project"
+                onPress={() => void $.prompt.submit({ text: setupPrompt(proj) })}
               />
             )}
           </Box>

@@ -30,7 +30,7 @@ for (const surface of SURFACES) {
       props: { title: 'Claude', isFocused: false } as never,
       viewport: { columns: 70, rows: 50 } as never,
     })
-    expect((await ui.find({ key: 'script:dev' }))?.text).toContain('npm run dev')
+    expect((await ui.find({ key: 'script:dev' }))?.text).toContain('Start Project')
     expect(await ui.find({ key: 'script:start' })).toBeUndefined()
 
     await ui.press({ key: 'script:dev' })
@@ -69,7 +69,7 @@ test('stopping a script with the button shows «stopped», not a failed exit', a
   await $.command.run({ command: 'claudify', args: '', origin: { kind: 'user' } } as never)
   const ui = await $.ui.mount({ plugin: 'claudify', surface: 'terminal', component: 'Pane', requestId: 'claudify', props: { title: 'Claude', isFocused: false } as never, viewport: { columns: 70, rows: 50 } as never })
   void ui.press({ key: 'script:start' })
-  for (let i = 0; i < 50 && !(await ui.find({ key: 'script:start' }))?.text.includes('Stop'); i++) await nap(10)
+  for (let i = 0; i < 50 && !(await ui.find({ key: 'script:start' }))?.text.includes('Stop Project'); i++) await nap(10)
   await ui.press({ key: 'script:start' })
   for (let i = 0; i < 50 && (await ui.findAll({ type: 'Text' })).every(t => !t.text.includes('stopped')); i++) await nap(10)
   const text = (await ui.findAll({ type: 'Text' })).map(t => t.text)

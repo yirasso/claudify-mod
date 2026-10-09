@@ -3,9 +3,9 @@ import { expect, test } from 'claude-code/testing'
 type Case = { name: string; repo: boolean; remote: string; button: string; last: string }
 
 const CASES: Case[] = [
-  { name: 'no repo: creates it, commits and publishes it', repo: false, remote: '', button: 'Create GitHub repo & push', last: 'gh repo create nau --private --source . --remote origin --push' },
-  { name: 'repo without GitHub: commits and publishes it', repo: true, remote: '', button: 'Publish to GitHub & push', last: 'gh repo create nau --private --source . --remote origin --push' },
-  { name: 'repo on GitHub: commits and pushes', repo: true, remote: 'origin\thttps://github.com/yirasso/nau.git (fetch)', button: 'Commit & push', last: 'git push' },
+  { name: 'no repo: creates it, commits and publishes it', repo: false, remote: '', button: 'Save Changes', last: 'gh repo create nau --private --source . --remote origin --push' },
+  { name: 'repo without GitHub: commits and publishes it', repo: true, remote: '', button: 'Save Changes', last: 'gh repo create nau --private --source . --remote origin --push' },
+  { name: 'repo on GitHub: commits and pushes', repo: true, remote: 'origin\thttps://github.com/yirasso/nau.git (fetch)', button: 'Save Changes', last: 'git push' },
 ]
 
 for (const c of CASES) {
