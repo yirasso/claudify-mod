@@ -7,7 +7,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { GithubFlow, GithubPlan, ProjectScripts, ScriptRun, UsageLimit } from '../types'
 
-const project = atom({ plugin: 'claudify', key: 'project' } as const, { pm: 'npm', names: [], graphify: null, github: null, branch: null, ponytail: null, git: true, pending: false })
+const project = atom({ plugin: 'claudify', key: 'project' } as const, { pm: 'npm', names: [], graphify: null, graphStale: false, github: null, branch: null, ponytail: null, git: true, pending: false })
 const runs = atom({ plugin: 'claudify', key: 'runs' } as const, {})
 const github = atom({ plugin: 'claudify', key: 'github' } as const, { phase: 'idle', plan: 'push', log: [] })
 const limits = atom({ plugin: 'claudify', key: 'limits' } as const, [])
@@ -76,7 +76,10 @@ async function readProject($: EngineInterface): Promise<void> {
   const ponytail = Object.entries(settings.enabledPlugins ?? {}).find(([id, on]) => id.startsWith('ponytail@') && on === true)?.[0] ?? null
   // An empty graph.json is a build that failed: it does not count.
   const graphify = graph && graph.size > 0 ? graph.mtimeMs : null
-  await update($, project, () => ({ pm, names, graphify, github: repo, branch, ponytail, git: isRepo, pending }))
+  // The graph is out of date once a commit after it touched more than the graph and .gitignore.
+  // shortcut: a commit made right after building the graph counts too, until a file-level check is worth it.
+  const graphStale = graphify !== null && isRepo && (await git('log', `--since=@${Math.floor(graphify / 1000)}`, '--format=%H', '--', '.', ':(exclude)graphify-out', ':(exclude).gitignore')) !== ''
+  await update($, project, () => ({ pm, names, graphify, graphStale, github: repo, branch, ponytail, git: isRepo, pending }))
 }
 
 /** Keeps the rate-limit windows the band draws. */
@@ -289,11 +292,15 @@ function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns:
   const setupButton = (!proj.github || !proj.graphify || !proj.ponytail) && (
     <Button key="project:setup" variant="secondary" label="⚙ Setup Project" onPress={() => void $.prompt.submit({ text: setupPrompt(proj) })} />
   )
-  // The checks: a filled green dot when it is on, a hollow dim one when it is not.
+  // Update Graph is there while commits newer than the graph wait to go into it.
+  const graphButton = proj.graphStale && (
+    <Button key="graphify:update" variant="secondary" label="↻ Update Graph" onPress={() => void $.prompt.submit({ text: 'Update the graphify knowledge graph of this project with the files changed since it was built (/graphify . --update).' })} />
+  )
+  // The checks: a filled green dot when it is on, a hollow dim one when it is not, a yellow one when out of date.
   const checks = [
-    { label: 'GitHub', on: !!proj.github },
-    { label: 'graphify', on: proj.graphify !== null },
-    { label: 'Ponytail', on: !!proj.ponytail },
+    { label: 'GitHub', on: !!proj.github, stale: false },
+    { label: 'graphify', on: proj.graphify !== null, stale: proj.graphStale },
+    { label: 'Ponytail', on: !!proj.ponytail, stale: false },
   ]
   // The 5-hour and weekly limits as bars; a window past its reset reads empty until the next response.
   const now = Date.now()
@@ -314,10 +321,11 @@ function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns:
           {startButton}
           {saveButton}
           {setupButton}
+          {graphButton}
         </Box>
         <Box flexDirection="row" gap={2}>
           {checks.map(c => (
-            <Text color={c.on ? 'success' : undefined} dimColor={!c.on}>
+            <Text color={c.stale ? 'warning' : c.on ? 'success' : undefined} dimColor={!c.on}>
               {`${c.on ? '●' : '○'} ${c.label}`}
             </Text>
           ))}
