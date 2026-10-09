@@ -75,12 +75,16 @@ test('a run with an address gets Open; a run that found its port taken gets Free
   for (let i = 0; i < 50 && (await ui.findAll({ type: 'Text' })).every(t => !t.text.includes('dev finished')); i++) await nap()
 })
 
-test('Pull: shown while GitHub is ahead; pulls, then the code graph follows with no model and changed docs wait', async ($, on) => {
-  const files: Record<string, string> = {}
+test('Pull: shown while GitHub is ahead; pulls, then the graph follows: code with no model, the pulled docs to Sonnet', async ($, on) => {
+  const files: Record<string, string> = {
+    'C:/Dev/Nau/README.md': '# Nau, edited on GitHub',
+    'C:/Users/T/.claude/skills/graphify/references/extraction-spec.md': '```\nFiles (chunk CHUNK_NUM of TOTAL_CHUNKS):\nFILE_LIST\n```',
+  }
   const key = (path: string) => path.replace(/\\/g, '/')
   on('fs.read', async (_$: unknown, e: { path: string }) => (key(e.path) in files ? { value: files[key(e.path)] } : { deny: 'ENOENT' }) as never)
   on('fs.write', async (_$: unknown, e: { path: string; text: string }) => ((files[key(e.path)] = e.text), { value: undefined }) as never)
   on('fs.exists', async () => ({ value: false }))
+  on('env.get', async (_$: unknown, e: { name: string }) => ({ value: e.name === 'USERPROFILE' ? 'C:/Users/T' : undefined }) as never)
   on('settings.read', async () => ({ value: {} }) as never)
   on('session.cwd', async () => ({ value: 'C:/Dev/Nau' }))
   on('fs.list', async () => ({ value: [{ name: 'graph.json', kind: 'file', size: 2048, mtimeMs: 1_700_000_000_000, isLink: false }] }) as never)
@@ -100,8 +104,8 @@ test('Pull: shown while GitHub is ahead; pulls, then the code graph follows with
     return ok('')
   })
   on('session.usage', async () => ({ value: { startedAt: 0, context: {}, rateLimits: [] } }) as never)
-  let models = 0
-  on('model.complete', async () => (models++, { value: { isAnswered: false, reason: 'aborted', usage: {} } }) as never)
+  const asked: string[] = []
+  on('model.complete', async (_$: unknown, e: { prompt: string }) => (asked.push(e.prompt), { value: { isAnswered: true, text: '{"nodes":[{"id":"readme_nau"}],"edges":[]}', usage: {} } }) as never)
   on('session.start', async () => ({ cwd: 'C:/Dev/Nau' }) as never)
 
   await $.session.start({ cwd: 'C:/Dev/Nau', surface: 'desktop', isInteractive: true } as never)
@@ -110,11 +114,11 @@ test('Pull: shown while GitHub is ahead; pulls, then the code graph follows with
   await ui.press({ key: 'github:pull' })
   expect(ran).toContain('git pull --rebase --autostash')
   expect(ran).toContain('graphify update .')
-  expect(models).toBe(0)
-  // README.md changed: it waits for Update Graph, from the graph's date.
-  expect(files['C:/Dev/Nau/graphify-out/.claudify_docs_since']).toBe('1700000000000')
+  // README.md came with the pull: Sonnet reads it, and nothing is left waiting for Update Graph.
+  expect(asked.some(p => p.includes('C:/Dev/Nau/README.md'))).toBe(true)
+  expect(ran.some(c => c.includes('graph_docs.py'))).toBe(true)
+  expect(files['C:/Dev/Nau/graphify-out/.claudify_docs_since'] ?? '').toBe('')
   expect(await ui.find({ key: 'github:pull' })).toBeUndefined()
-  expect(await ui.find({ key: 'graphify:update' })).toBeTruthy()
 })
 
 for (const stale of [true, false]) {

@@ -279,14 +279,19 @@ async function followCommits($: EngineInterface): Promise<void> {
   const committed = Number((await sh($, ['git', 'log', '-1', '--format=%ct', head])).stdout.trim()) * 1000
   const docs = (await sh($, ['git', 'diff', '--name-only', before, head])).stdout.split('\n').map(f => f.trim()).filter(f => DOC_FILE.test(f) && !f.startsWith('graphify-out/'))
   if (!docs.length) return
-  const hooked = /post-commit: installed/.test((await sh($, ['graphify', 'hook', 'status'])).stdout)
+  // graphify's hook runs after a commit made here, not after a pull, a rebase or a checkout: the reflog says which.
+  const madeHere = /^commit/.test((await sh($, ['git', 'reflog', '-1', '--format=%gs'])).stdout.trim())
+  const hooked = madeHere && /post-commit: installed/.test((await sh($, ['graphify', 'hook', 'status'])).stdout)
   if (hooked) {
     await update($, graphJob, (): GraphJob => ({ text: "Waiting for graphify's hook to rebuild the code…" }))
     const cwd = await $.session.cwd()
-    for (let i = 0; i < 40; i++) {
+    // At most a minute by the wall clock; then the band goes on (its own update covers a hook that did not run).
+    const deadline = Date.now() + 60_000
+    while (Date.now() < deadline) {
       const graph = await $.fs.stat(`${cwd}/graphify-out/graph.json`).catch(() => null)
       if (graph && graph.mtimeMs >= committed) break
-      await $.clock.sleep(3000)
+      const slept = await $.clock.sleep(3000).then(() => true, () => false)
+      if (!slept) break
     }
   }
   await updateGraph($, { code: !hooked, since: Number.isFinite(sinceBefore) && sinceBefore > 1000 ? sinceBefore : undefined })
@@ -808,11 +813,11 @@ async function runGithub($: EngineInterface): Promise<void> {
   await refreshCodeGraph($)
 }
 
-/** The code part of the graph follows a push or a pull by itself (no model); changed docs wait for the button. */
-async function refreshCodeGraph($: EngineInterface): Promise<void> {
+/** The graph follows a push (code, no model; docs wait) or a pull (code and the docs it brought, through Sonnet). */
+async function refreshCodeGraph($: EngineInterface, withDocs = false): Promise<void> {
   await readProject($)
   if ((await read($, project)).graphify === null) return
-  await updateGraph($, { docs: false })
+  await updateGraph($, { docs: withDocs })
   // A repo Setup Project just made gets graphify's commit hook now (the graph was built before the repo was).
   await installGraphHook($)
 }
@@ -843,7 +848,11 @@ async function pullChanges($: EngineInterface): Promise<void> {
   await update($, github, (): GithubFlow => ({ phase: r.exitCode === 0 ? 'done' : 'error', plan: 'push', log, ...(conflicts.length ? { conflicts } : {}) }))
   // A conflict stays until it is dealt with; anything else folds back.
   if (!conflicts.length) collapseSoon($)
-  if (r.exitCode === 0) await refreshCodeGraph($)
+  if (r.exitCode === 0) {
+    // The pull moved HEAD: the band updates the graph itself (code and docs), so followCommits leaves it.
+    lastHead = (await sh($, ['git', 'rev-parse', 'HEAD'])).stdout.trim() || lastHead
+    await refreshCodeGraph($, true)
+  }
   else await readProject($)
 }
 
