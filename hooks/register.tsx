@@ -17,6 +17,7 @@ const notify = atom({ plugin: 'claudify', key: 'notify' } as const, true)
 const vscode = atom({ plugin: 'claudify', key: 'vscode' } as const, false)
 const types = atom({ plugin: 'claudify', key: 'types' } as const, null)
 const off = atom({ plugin: 'claudify', key: 'off' } as const, false)
+const health = atom({ plugin: 'claudify', key: 'health' } as const, [])
 
 // ——— The project: what Start Project runs, and the checks ———
 
@@ -504,6 +505,20 @@ async function openFolder($: EngineInterface): Promise<void> {
   else if ((await sh($, ['open', cwd])).exitCode !== 0) await sh($, ['xdg-open', cwd])
 }
 
+/**
+ * What the band needs and is missing, checked once per load: git, GitHub's CLI and its login, and graphify. Each
+ * entry says what fails and how to fix it; none, no line.
+ */
+async function checkHealth($: EngineInterface): Promise<void> {
+  const found: string[] = []
+  if ((await sh($, ['git', '--version'])).exitCode !== 0) found.push('git not installed')
+  const ghAuth = await sh($, ['gh', 'auth', 'status'])
+  if (ghAuth.exitCode === -1 || /not found|not recognized|ENOENT/i.test(ghAuth.stderr)) found.push('GitHub CLI not installed (gh)')
+  else if (ghAuth.exitCode !== 0) found.push('gh not signed in (gh auth login)')
+  if ((await sh($, ['graphify', '--help'])).exitCode !== 0) found.push('graphify not installed (uv tool install graphifyy)')
+  await update($, health, () => found)
+}
+
 /** Whether VS Code's `code` command is installed (looked up once per load, for the </> button). */
 async function findVscode($: EngineInterface): Promise<void> {
   const windows = (await $.env.get('OS')) === 'Windows_NT'
@@ -578,6 +593,39 @@ async function openUrl($: EngineInterface, url: string): Promise<void> {
 
 // ——— The GitHub button: create the repo, publish it, or just commit and push ———
 
+/** Files that hold secrets: .env files (not .env.example and the like), keys, credentials. */
+const SECRET_FILE = /(^|\/)(\.env(\.(?!example|sample|template|dist)[\w.-]+)?|[^/]*\.(pem|key|p12|pfx)|id_(rsa|ed25519|ecdsa)|credentials(\.json)?|secrets?\.(json|ya?ml|toml))$/i
+/** Lines of a diff that add a token: OpenAI/Anthropic, GitHub, AWS, Slack, Google keys, private keys. */
+const SECRET_LINE = /^\+.*(sk-(ant-)?[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{30,}|AKIA[0-9A-Z]{16}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{35}|-----BEGIN [A-Z ]*PRIVATE KEY-----)/m
+
+/**
+ * What a commit would send that looks secret: secret-looking files among the changes (each file, untracked ones
+ * included), and files whose added lines carry a token. Names only, never the secret itself.
+ */
+async function findSecrets($: EngineInterface, isRepo: boolean, diff: string): Promise<string[]> {
+  const changed = isRepo ? (await sh($, ['git', 'status', '--porcelain', '-uall'])).stdout.split('\n').map(l => l.slice(3).trim().replace(/^"|"$/g, '')).filter(Boolean) : []
+  const found = new Set(changed.filter(f => SECRET_FILE.test(f)))
+  let file = ''
+  for (const line of diff.split('\n')) {
+    if (line.startsWith('+++ b/')) file = line.slice(6)
+    else if (file && SECRET_LINE.test(line)) found.add(file)
+  }
+  return [...found].slice(0, 10)
+}
+
+/** The secrets warning's way out: those files go into .gitignore (and out of the index), then Save Changes again. */
+async function ignoreSecrets($: EngineInterface): Promise<void> {
+  const flow = await read($, github)
+  if (!flow.secrets?.length) return
+  const file = `${await $.session.cwd()}/.gitignore`
+  const text = await $.fs.read(file).catch(() => '')
+  const have = new Set(text.split(/\r?\n/).map(l => l.trim()))
+  const add = flow.secrets.filter(f => !have.has(f) && !have.has(`/${f}`))
+  if (add.length) await $.fs.write(file, `${text}${text && !text.endsWith('\n') ? '\n' : ''}${add.join('\n')}\n`)
+  await sh($, ['git', 'rm', '--cached', '-q', '--ignore-unmatch', '--', ...flow.secrets])
+  await prepareGithub($)
+}
+
 /** The branches the band does not call out. */
 const MAIN_BRANCHES = ['main', 'master']
 
@@ -621,6 +669,7 @@ async function prepareGithub($: EngineInterface, model = COMMIT_MODEL): Promise<
     status = entries.filter(e => !e.name.startsWith('.git')).map(e => `?? ${e.name}${e.kind === 'dir' ? '/' : ''}`).join('\n')
   }
   const files = status ? status.split('\n').filter(Boolean).length : 0
+  const secrets = files ? await findSecrets($, isRepo, diff) : []
   const ahead = isRepo && onGithub ? Number((await sh($, ['git', 'rev-list', '--count', '@{u}..HEAD'])).stdout.trim()) || 0 : 0
   if (!files && plan === 'push' && !ahead) {
     await update($, github, (): GithubFlow => ({ phase: 'done', plan, log: ['Nothing to commit or push: the branch is up to date.'] }))
@@ -645,7 +694,7 @@ async function prepareGithub($: EngineInterface, model = COMMIT_MODEL): Promise<
       return
     }
   }
-  await update($, github, (): GithubFlow => ({ phase: 'confirm', plan, message, files, target, ahead, log: [] }))
+  await update($, github, (): GithubFlow => ({ phase: 'confirm', plan, message, files, target, ahead, log: [], ...(secrets.length ? { secrets } : {}) }))
 }
 
 /** Step 2: the person confirmed; commit, create or publish the repository when needed, and push. */
@@ -753,7 +802,7 @@ function untilReset(ms: number): string {
  * off); on the right a dot for each check (GitHub, graphify, Ponytail) and the 5-hour and weekly limit
  * bars; then what the scripts and the GitHub flow report.
  */
-function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns: Record<string, ScriptRun>, gh: GithubFlow, usage: UsageLimit[], base: UsageLimit | null, job: GraphJob | null, notifyOn: boolean, hasVscode: boolean, check: TypeCheck | null) {
+function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns: Record<string, ScriptRun>, gh: GithubFlow, usage: UsageLimit[], base: UsageLimit | null, job: GraphJob | null, notifyOn: boolean, hasVscode: boolean, check: TypeCheck | null, missing: string[]) {
   const { Box, Button, Text } = ui
   // Start Project runs what this kind of project runs (startCommand).
   const start = proj.start
@@ -874,6 +923,11 @@ function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns:
         </Box>
       )
     })}
+    {missing.length > 0 && (
+      <Text color="warning" dimColor wrap="truncate-end">
+        {`⚠ ${missing.join(' · ')}`}
+      </Text>
+    )}
     {check?.status === 'error' && (
       <Box flexDirection="column">
         {check.errors.slice(0, 2).map(line => (
@@ -900,8 +954,12 @@ function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns:
             {`  ${line}`}
           </Text>
         ))}
+        {gh.secrets?.length ? (
+          <Text color="error" wrap="truncate-end">{`⚠ Looks secret: ${gh.secrets.join(', ')}`}</Text>
+        ) : null}
         <Box flexDirection="row" gap={1}>
-          <Button key="github:confirm" variant="primary" label={gh.files ? 'Commit & push' : 'Push'} onPress={() => void runGithub($)} />
+          {gh.secrets?.length ? <Button key="github:ignore-secrets" variant="primary" label="Leave them out (.gitignore)" onPress={() => void ignoreSecrets($)} /> : null}
+          <Button key="github:confirm" variant={gh.secrets?.length ? 'secondary' : 'primary'} label={gh.secrets?.length ? 'Commit & push anyway' : gh.files ? 'Commit & push' : 'Push'} onPress={() => void runGithub($)} />
           <Button key="github:cancel" label="Cancel" onPress={() => void update($, github, (): GithubFlow => ({ phase: 'idle', plan: 'push', log: [] }))} />
         </Box>
       </Box>
@@ -933,6 +991,7 @@ export const register: Register = on => {
     const notifyOn = await $.store.get('notify').catch(() => undefined)
     if (typeof notifyOn === 'boolean') await update($, notify, () => notifyOn)
     void findVscode($).catch(() => undefined)
+    void checkHealth($).catch(() => undefined)
     await readProject($)
     const usage = await $.session.usage().catch(() => null)
     if (usage) await setLimits($, usage.rateLimits)
@@ -961,7 +1020,8 @@ export const register: Register = on => {
     const notifyOn = await read($, notify)
     const hasVscode = await read($, vscode)
     const check = await read($, types)
-    return <Box flexDirection="column">{actionBar($, $.ui.resolve(e), proj, scriptRuns, gh, usage, base, job, notifyOn, hasVscode, check)}</Box>
+    const missing = await read($, health)
+    return <Box flexDirection="column">{actionBar($, $.ui.resolve(e), proj, scriptRuns, gh, usage, base, job, notifyOn, hasVscode, check, missing)}</Box>
   })
 
   // /claudify off hides the band and stops its automatic work in this project; /claudify brings them back.

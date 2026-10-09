@@ -37,6 +37,8 @@ export type GithubFlow = {
   ahead?: number
   target?: string
   url?: string
+  /** Changed files that look secret (names only), shown before the person confirms. */
+  secrets?: string[]
   /** The commit the last Save Changes made, while Undo is offered. */
   undo?: string
   log: string[]
@@ -71,6 +73,8 @@ declare module 'claude-code' {
       types: TypeCheck | null
       /** Whether Claudify is off for this project (/claudify off; /claudify turns it on). */
       off: boolean
+      /** What the band needs and is missing (gh not signed in, graphify not installed…), checked once per load. */
+      health: string[]
     }
   }
 }
