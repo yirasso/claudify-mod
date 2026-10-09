@@ -64,6 +64,8 @@ declare module 'claude-code' {
       notify: boolean
       /** Whether VS Code's `code` command is installed (the </> button shows only then). */
       vscode: boolean
+      /** Whether the band's ⋯ menu (folder, VS Code, sound) is open. */
+      menuOpen: boolean
     }
   }
 }

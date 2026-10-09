@@ -1,6 +1,6 @@
 # Claudify plugin
 
-A Claude Code plugin (a "mod": function hooks, no MCP server) with one part: the **band above the prompt** with the action buttons on the left (Start/Stop Project; Install deps only while the manifest or lockfile is newer than the last install; Pull only while GitHub is ahead; Save Changes only while something waits to go to GitHub; Setup Project only while GitHub, graphify or Ponytail is off; Update Graph only while commits newer than the graph wait to go into it, with a yellow graphify dot; 📁 and </> open the folder and VS Code, </> only when `code` is installed) and, aligned right, the branch when it is not main, a dot for each check (green ● on, dim ○ off) the 5-hour and weekly limit bars (from 70% with the time until they reset) and how much of the week this session used, and the 🔔/🔕 toggle for the long-turn sound, and the script output (with Open for its address, Free port when its port was taken, and Send error to Claude when it failed) and the GitHub confirm flow under them.
+A Claude Code plugin (a "mod": function hooks, no MCP server) with one part: the **band above the prompt** with the action buttons on the left (Start/Stop Project; Install deps only while the manifest or lockfile is newer than the last install; Pull only while GitHub is ahead; Save Changes only while something waits to go to GitHub; Setup Project only while GitHub, graphify or Ponytail is off; Update Graph only while commits newer than the graph wait to go into it, with a yellow graphify dot) and, aligned right, the branch when it is not main, a dot for each check (green ● on, dim ○ off) the 5-hour and weekly limit bars (from 70% with the time until they reset) and how much of the week this session used, and a ⋯ menu (📁 Open folder, </> Open in VS Code when `code` is installed, 🔔/🔕 the long-turn sound), and the script output (with Open for its address, Free port when its port was taken, and Send error to Claude when it failed) and the GitHub confirm flow under them.
 
 The pane with the session's skills, MCP servers, connectors and plugins moved on 2026-10-09 to its own plugin, `setup-info`, in `C:\Dev\Claude Setup Info`.
 
@@ -42,7 +42,7 @@ The owner is Tomás. He talks in European Portuguese (never Brazilian); the plug
 **Validator and API**
 - **The plugin name** can't start with `claude-`.
 - **Atom refs** need literal plugin and key strings.
-- **`$`** may only be passed to top-level functions.
+- **`$`** may only be passed to top-level functions declared in the same file: never to an imported one. That is why everything is in one `register.tsx`; splitting it by area was tried (0.7.4) and the engine refused to load it.
 - **`$.ui.resolve(e)`** gives the elements per surface: Box/Text/Button everywhere, Svg on desktop only.
 - **The graphify check** uses `$.session.cwd()` plus `graphify-out/graph.json`. `fs.list('.')` failed.
 - **A plugin can't spawn an Agent under auto mode**: the classifier refuses it ("the request that produced this action did not ask for one"). Call the model with `$.model.complete` instead.

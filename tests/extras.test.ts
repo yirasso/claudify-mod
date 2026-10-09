@@ -82,15 +82,21 @@ test('the bell turns the done sound for long turns on and off, and the folder an
   expect(toasts()).toBe(0)
   await turn(90_000)
   expect(toasts()).toBe(1)
+  // The bell lives in the ⋯ menu, with the folder and VS Code.
+  expect(await ui.find({ key: 'notify:toggle' })).toBeUndefined()
+  await ui.press({ key: 'band:menu' })
   await ui.press({ key: 'notify:toggle' })
   expect(stored.notify).toBe(false)
-  expect((await ui.find({ key: 'notify:toggle' }))?.text).toContain('🔕')
+  expect((await ui.find({ key: 'notify:toggle' }))?.text).toContain('🔕 Sound off')
   await turn(90_000)
   expect(toasts()).toBe(1)
 
   // VS Code was found (`where code` answered): its button is there.
   expect(await ui.find({ key: 'project:editor' })).toBeTruthy()
   await ui.press({ key: 'project:folder' })
+  // A choice closes the menu.
+  expect(await ui.find({ key: 'project:editor' })).toBeUndefined()
+  await ui.press({ key: 'band:menu' })
   await ui.press({ key: 'project:editor' })
   expect(ran).toContain("powershell.exe -NoProfile -NonInteractive -Command Invoke-Item -LiteralPath 'C:\\Dev\\Nau'")
   expect(ran).toContain('cmd /c code C:/Dev/Nau')
@@ -101,6 +107,7 @@ test('without VS Code the </> button is not there', async ($, on) => {
   repo(on, 0, 0.5, ran, false)
   await $.session.start({ cwd: 'C:/Dev/Nau', surface: 'desktop', isInteractive: true } as never)
   const ui = await $.ui.mount({ plugin: 'claudify', surface: 'desktop', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false } as never })
+  await ui.press({ key: 'band:menu' })
   expect(await ui.find({ key: 'project:folder' })).toBeTruthy()
   expect(await ui.find({ key: 'project:editor' })).toBeUndefined()
 })
