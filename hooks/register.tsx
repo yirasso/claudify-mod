@@ -778,8 +778,9 @@ export const register: Register = on => {
       const stopped: ScriptRun = { ...run, status: 'exited', code: null, tail: [...run.tail, 'Stopped when the mod reloaded.'].slice(-TAIL) }
       await update($, runs, all => ({ ...all, [name]: stopped }))
     }
-    // Nothing of the graph runs across a reload: a line left from before (a failure) goes.
+    // Nothing of the graph runs across a reload: a line left from before (a failure) goes, and what had finished folds back.
     await update($, graphJob, () => null)
+    await collapse($)
     await readProject($)
     const usage = await $.session.usage().catch(() => null)
     if (usage) await setLimits($, usage.rateLimits)
