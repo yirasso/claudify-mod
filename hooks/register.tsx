@@ -7,12 +7,13 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { GithubFlow, GithubPlan, GraphJob, ProjectScripts, ScriptRun, StartCommand, UsageLimit } from '../types'
 
-const project = atom({ plugin: 'claudify', key: 'project' } as const, { start: null, install: null, graphify: null, graphStale: false, github: null, branch: null, ponytail: null, git: true, pending: false, behind: 0 })
+const project = atom({ plugin: 'claudify', key: 'project' } as const, { start: null, install: null, graphify: null, graphStale: false, github: null, branch: null, ponytail: null, git: true, pending: false, behind: 0, changed: 0, lastCommit: null })
 const runs = atom({ plugin: 'claudify', key: 'runs' } as const, {})
 const github = atom({ plugin: 'claudify', key: 'github' } as const, { phase: 'idle', plan: 'push', log: [] })
 const limits = atom({ plugin: 'claudify', key: 'limits' } as const, [])
 const weekStart = atom({ plugin: 'claudify', key: 'weekStart' } as const, null)
 const graphJob = atom({ plugin: 'claudify', key: 'graphJob' } as const, null)
+const notify = atom({ plugin: 'claudify', key: 'notify' } as const, true)
 
 // ——— The project: what Start Project runs, and the checks ———
 
@@ -194,9 +195,9 @@ async function graphFailed($: EngineInterface, text: string): Promise<void> {
  * Two seconds after something finished, the band folds back: the GitHub flow's lines (a push, a pull, an error),
  * a graph failure and the runs that ended. A failed run stays while it has a button (Send error, Free port).
  */
-function collapseSoon($: EngineInterface): void {
+function collapseSoon($: EngineInterface, ms = 2000): void {
   try {
-    $.clock.after(2000, () => void collapse($).catch(() => undefined))
+    $.clock.after(ms, () => void collapse($).catch(() => undefined))
   } catch {
     // No clock (tests): the lines stay.
   }
@@ -342,19 +343,23 @@ async function readProject($: EngineInterface): Promise<void> {
   const isRepo = (await git('rev-parse', '--is-inside-work-tree')) === 'true'
   const remote = await git('remote', 'get-url', 'origin')
   const repo = /github\.com[:/]([^/\s]+\/[^/\s]+?)(?:\.git)?\/?$/.exec(remote)?.[1] ?? null
-  const branch = repo ? (await git('rev-parse', '--abbrev-ref', 'HEAD')) || null : null
+  const branch = isRepo ? (await git('rev-parse', '--abbrev-ref', 'HEAD')) || null : null
   // Something to send to GitHub: a folder with no repo yet, a repo not on GitHub yet, changed files, or
   // commits the remote does not have (all of them, when the branch has no upstream).
   // Behind: commits the remote has and the branch does not (as of the last fetch).
   let pending: boolean
   let behind = 0
+  // For the commit reminder: files waiting, and when the last commit was made.
+  const status = isRepo ? await git('status', '--porcelain') : ''
+  const changed = status ? status.split('\n').filter(Boolean).length : 0
+  const lastCommit = isRepo ? Number(await git('log', '-1', '--format=%ct')) * 1000 || null : null
   if (!isRepo) pending = (await $.fs.list(cwd).catch(() => [])).some(x => !x.name.startsWith('.'))
   else if (!repo) pending = true
   else {
     const upstream = await git('rev-parse', '--abbrev-ref', '@{u}')
     const ahead = upstream ? Number(await git('rev-list', '--count', '@{u}..HEAD')) || 0 : (await git('rev-parse', 'HEAD')) ? 1 : 0
     behind = upstream ? Number(await git('rev-list', '--count', 'HEAD..@{u}')) || 0 : 0
-    pending = (await git('status', '--porcelain')) !== '' || ahead > 0
+    pending = status !== '' || ahead > 0
   }
   // Ponytail: the plugin enabled in the merged settings (user, project or local).
   const settings = (await $.settings.read().catch(() => ({}))) as { enabledPlugins?: Record<string, unknown> }
@@ -367,7 +372,7 @@ async function readProject($: EngineInterface): Promise<void> {
   const codeStale = graphify !== null && isRepo && (await git('log', `--since=@${Math.floor(graphify / 1000)}`, '--format=%H', '--', '.', ':(exclude)graphify-out', ':(exclude).gitignore')) !== ''
   const docsWaiting = graphify !== null && Number((await $.fs.read(`${cwd}/${DOCS_SINCE}`).catch(() => '')).trim()) > 0
   const graphStale = codeStale || docsWaiting
-  await update($, project, () => ({ start, install, graphify, graphStale, github: repo, branch, ponytail, git: isRepo, pending, behind }))
+  await update($, project, () => ({ start, install, graphify, graphStale, github: repo, branch, ponytail, git: isRepo, pending, behind, changed, lastCommit }))
 }
 
 /** Keeps the rate-limit windows the band draws. */
@@ -468,6 +473,44 @@ async function sendError($: EngineInterface, name: string): Promise<void> {
   await $.prompt.submit({ text: `Start Project ran \`${run.cmd ?? name}\` and it failed with exit code ${run.code}. Its last output:\n\n${fence}\n${output}\n${fence}\n\nFind the cause and fix it.` })
 }
 
+/** A Windows notification (through PowerShell's own app id, so no install is needed). */
+async function notifyDone($: EngineInterface, seconds: number): Promise<void> {
+  if ((await $.env.get('OS')) !== 'Windows_NT') return
+  const folder = ((await $.session.cwd().catch(() => '')).split(/[\\/]/).filter(Boolean).pop() ?? '').replace(/'/g, "''")
+  const script = [
+    '$null = [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]',
+    '$x = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)',
+    '$t = $x.GetElementsByTagName("text")',
+    `$null = $t.Item(0).AppendChild($x.CreateTextNode('Claude is done${folder ? ` · ${folder}` : ''}'))`,
+    `$null = $t.Item(1).AppendChild($x.CreateTextNode('The turn took ${Math.round(seconds / 60)} min.'))`,
+    "[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe').Show([Windows.UI.Notifications.ToastNotification]::new($x))",
+  ].join('; ')
+  await sh($, ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', script])
+}
+
+/** Turns the notifications on or off, for every session (kept in the plugin's store). */
+async function toggleNotify($: EngineInterface): Promise<void> {
+  const on = !(await read($, notify))
+  await update($, notify, () => on)
+  await $.store.set('notify', on).catch(() => undefined)
+}
+
+// ——— 10: the project's folder and editor ———
+
+/** Opens the session folder in the file manager. */
+async function openFolder($: EngineInterface): Promise<void> {
+  const cwd = await $.session.cwd()
+  if ((await $.env.get('OS')) === 'Windows_NT') await sh($, ['explorer.exe', cwd.replace(/\//g, '\\')])
+  else if ((await sh($, ['open', cwd])).exitCode !== 0) await sh($, ['xdg-open', cwd])
+}
+
+/** Opens the session folder in VS Code (`code` is a .cmd on Windows, so through cmd). */
+async function openEditor($: EngineInterface): Promise<void> {
+  const cwd = await $.session.cwd()
+  if ((await $.env.get('OS')) === 'Windows_NT') await sh($, ['cmd', '/c', 'code', cwd])
+  else await sh($, ['code', cwd])
+}
+
 /** Opens a dev server's address in the default browser. */
 async function openUrl($: EngineInterface, url: string): Promise<void> {
   if ((await $.env.get('OS')) === 'Windows_NT') await sh($, ['rundll32', 'url.dll,FileProtocolHandler', url])
@@ -475,6 +518,9 @@ async function openUrl($: EngineInterface, url: string): Promise<void> {
 }
 
 // ——— The GitHub button: create the repo, publish it, or just commit and push ———
+
+/** The branches the band does not call out. */
+const MAIN_BRANCHES = ['main', 'master']
 
 /** The model that writes the commit message for Save Changes (Haiku 5.5 at medium effort; Setup Project uses Sonnet). */
 const COMMIT_MODEL = 'claude-haiku-5-5'
@@ -502,7 +548,8 @@ async function prepareGithub($: EngineInterface, model = COMMIT_MODEL): Promise<
   const remotes = isRepo ? (await sh($, ['git', 'remote', '-v'])).stdout : ''
   const onGithub = /github\.com[:/]/.test(remotes)
   const plan: GithubPlan = !isRepo ? 'create' : onGithub ? 'push' : 'publish'
-  const target = plan === 'push' ? ((await read($, project)).github ?? 'origin') : `${await repoName($)} (private, new)`
+  const proj = await read($, project)
+  const target = plan === 'push' ? `${proj.github ?? 'origin'}${proj.branch && !MAIN_BRANCHES.includes(proj.branch) ? ` ⎇ ${proj.branch}` : ''}` : `${await repoName($)} (private, new)`
 
   // What changed: the status and the diff (for a folder with no repo yet, the files it would commit).
   let status = ''
@@ -562,9 +609,11 @@ async function runGithub($: EngineInterface): Promise<void> {
     return true
   }
   if (flow.plan === 'create' && !(await step('git init', ['git', 'init']))) return
+  let undo: string | undefined
   if (flow.files) {
     if (!(await step('git add -A', ['git', 'add', '-A']))) return
     if (!(await step('git commit', ['git', 'commit', '-F', '-'], flow.message ?? ''))) return
+    undo = (await sh($, ['git', 'rev-parse', 'HEAD'])).stdout.trim() || undefined
   }
   if (flow.plan === 'push') {
     const upstream = (await sh($, ['git', 'rev-parse', '--abbrev-ref', '@{u}'])).exitCode === 0
@@ -576,8 +625,9 @@ async function runGithub($: EngineInterface): Promise<void> {
     if (!(await step(`gh repo create ${name} --private`, ['gh', 'repo', 'create', name, '--private', '--source', '.', '--remote', hasOrigin ? 'github' : 'origin', '--push']))) return
   }
   const url = (await sh($, ['gh', 'repo', 'view', '--json', 'url', '-q', '.url'])).stdout.trim()
-  await update($, github, (all): GithubFlow => ({ ...all, phase: 'done', log: [...log], ...(url ? { url } : {}) }))
-  collapseSoon($)
+  await update($, github, (all): GithubFlow => ({ ...all, phase: 'done', log: [...log], ...(url ? { url } : {}), ...(undo ? { undo } : {}) }))
+  // With an Undo to offer, the lines stay ten seconds instead of two.
+  collapseSoon($, undo ? 10_000 : 2000)
   await refreshCodeGraph($)
 }
 
@@ -585,6 +635,21 @@ async function runGithub($: EngineInterface): Promise<void> {
 async function refreshCodeGraph($: EngineInterface): Promise<void> {
   await readProject($)
   if ((await read($, project)).graphify !== null) await updateGraph($, { docs: false })
+}
+
+/** Undo for the last Save Changes: it was pushed, so a revert commit undoes it, pushed in turn. */
+async function undoSave($: EngineInterface): Promise<void> {
+  const sha = (await read($, github)).undo
+  if (!sha) return
+  const log = [`> git revert ${sha.slice(0, 7)}`]
+  await update($, github, (): GithubFlow => ({ phase: 'working', plan: 'push', log: [...log] }))
+  const reverted = await sh($, ['git', 'revert', '--no-edit', sha])
+  log.push(...`${reverted.stdout}\n${reverted.stderr}`.trim().split('\n').filter(Boolean).slice(-2))
+  const pushed = reverted.exitCode === 0 ? await sh($, ['git', 'push']) : null
+  if (pushed) log.push('> git push', ...`${pushed.stdout}\n${pushed.stderr}`.trim().split('\n').filter(Boolean).slice(-2))
+  await update($, github, (): GithubFlow => ({ phase: pushed?.exitCode === 0 ? 'done' : 'error', plan: 'push', log }))
+  collapseSoon($)
+  await refreshCodeGraph($)
 }
 
 /** The Pull button: fast-forwards the branch to what GitHub has, reporting in the GitHub flow's lines. */
@@ -629,7 +694,7 @@ function untilReset(ms: number): string {
  * off); on the right a dot for each check (GitHub, graphify, Ponytail) and the 5-hour and weekly limit
  * bars; then what the scripts and the GitHub flow report.
  */
-function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns: Record<string, ScriptRun>, gh: GithubFlow, usage: UsageLimit[], base: UsageLimit | null, job: GraphJob | null) {
+function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns: Record<string, ScriptRun>, gh: GithubFlow, usage: UsageLimit[], base: UsageLimit | null, job: GraphJob | null, notifyOn: boolean) {
   const { Box, Button, Text } = ui
   // Start Project runs what this kind of project runs (startCommand).
   const start = proj.start
@@ -645,8 +710,10 @@ function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns:
     <Text dimColor>▶ Start Project</Text>
   )
   // Save Changes is there only while something is waiting to go to GitHub, and not while its flow runs.
+  // Many files waiting, or changes two hours after the last commit: Save Changes stands out, with the count.
+  const nudge = proj.changed > 15 || (proj.changed > 0 && proj.lastCommit !== null && Date.now() - proj.lastCommit > 2 * 3_600_000)
   const saveButton = proj.pending && (gh.phase === 'idle' || gh.phase === 'done' || gh.phase === 'error') && (
-    <Button key="github:start" variant="secondary" label="↑ Save Changes" onPress={() => void prepareGithub($)} />
+    <Button key="github:start" variant={nudge ? 'primary' : 'secondary'} label={`↑ Save Changes${proj.changed ? ` (${proj.changed})` : ''}`} onPress={() => void prepareGithub($)} />
   )
   // Setup Project leaves once GitHub, graphify and Ponytail are all on.
   const setupButton = (!proj.github || !proj.graphify || !proj.ponytail) && (
@@ -695,8 +762,11 @@ function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns:
           {saveButton}
           {setupButton}
           {graphButton}
+          <Button key="project:folder" variant="secondary" label="📁" onPress={() => void openFolder($)} />
+          <Button key="project:editor" variant="secondary" label="</>" onPress={() => void openEditor($)} />
         </Box>
         <Box flexDirection="row" gap={2}>
+          {proj.branch && !MAIN_BRANCHES.includes(proj.branch) && <Text color="warning">{`⎇ ${proj.branch}`}</Text>}
           {checks.map(c => (
             <Text color={c.stale ? 'warning' : c.on ? 'success' : undefined} dimColor={!c.on}>
               {`${c.on ? '●' : '○'} ${c.label}`}
@@ -708,6 +778,7 @@ function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns:
             </Text>
           ))}
           {session !== null && <Text dimColor>{`Session +${Number(session.toFixed(1))}%`}</Text>}
+          <Button key="notify:toggle" variant="secondary" label={notifyOn ? '🔔' : '🔕'} onPress={() => void toggleNotify($)} />
         </Box>
       </Box>
     {Object.entries(scriptRuns).map(([name, run]) => {
@@ -765,6 +836,7 @@ function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns:
         </Text>
       ))}
     {gh.phase === 'done' && gh.url && <Text color="suggestion">{`  ${gh.url}`}</Text>}
+    {gh.phase === 'done' && gh.undo && <Button key="github:undo" variant="secondary" label="↶ Undo" onPress={() => void undoSave($)} />}
     </Box>
   )
 }
@@ -781,6 +853,8 @@ export const register: Register = on => {
     // Nothing of the graph runs across a reload: a line left from before (a failure) goes, and what had finished folds back.
     await update($, graphJob, () => null)
     await collapse($)
+    const notifyOn = await $.store.get('notify').catch(() => undefined)
+    if (typeof notifyOn === 'boolean') await update($, notify, () => notifyOn)
     await readProject($)
     const usage = await $.session.usage().catch(() => null)
     if (usage) await setLimits($, usage.rateLimits)
@@ -803,7 +877,8 @@ export const register: Register = on => {
     const usage = await read($, limits)
     const base = await read($, weekStart)
     const job = await read($, graphJob)
-    return <Box flexDirection="column">{actionBar($, $.ui.resolve(e), proj, scriptRuns, gh, usage, base, job)}</Box>
+    const notifyOn = await read($, notify)
+    return <Box flexDirection="column">{actionBar($, $.ui.resolve(e), proj, scriptRuns, gh, usage, base, job, notifyOn)}</Box>
   })
 
   // The limit bars follow the windows as the engine measures them.
@@ -826,6 +901,8 @@ export const register: Register = on => {
     await readProject($)
     // The main thread's turn only: the code it changed goes into the graph, and a commit it made brings its docs.
     if (e.agentId === undefined) void followCommits($).then(() => followTurn($)).catch(() => undefined)
+    // A turn over a minute long: a notification, so the person can do something else meanwhile.
+    if (e.agentId === undefined && e.durationMs > 60_000 && (await read($, notify))) void notifyDone($, e.durationMs / 1000).catch(() => undefined)
     return done
   })
 }
