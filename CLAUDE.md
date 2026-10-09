@@ -4,7 +4,7 @@ A Claude Code plugin (a "mod": function hooks, no MCP server) with one part: the
 
 The pane with the session's skills, MCP servers, connectors and plugins moved on 2026-10-09 to its own plugin, `setup-info`, in `C:\Dev\Claude Setup Info`.
 
-The owner is Tomás. He talks in European Portuguese (never Brazilian); the plugin's UI and code are in English. Repo: https://github.com/yirasso/claudify (branch `main`).
+The owner is Tomás. He talks in European Portuguese (never Brazilian); the plugin's UI and code are in English. Repo: https://github.com/yirasso/claudify (branch `main`), **public since 2026-10-09** under the MIT license: others install it with `/plugin marketplace add yirasso/claudify` and `/plugin install claudify@tomas-plugins`. Keep secrets and personal data out of commits; the README (with `docs/band.png`) is the public face.
 
 ## Install and reload
 
