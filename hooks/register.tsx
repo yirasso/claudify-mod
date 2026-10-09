@@ -11,6 +11,7 @@ const project = atom({ plugin: 'claudify', key: 'project' } as const, { pm: 'npm
 const runs = atom({ plugin: 'claudify', key: 'runs' } as const, {})
 const github = atom({ plugin: 'claudify', key: 'github' } as const, { phase: 'idle', plan: 'push', log: [] })
 const limits = atom({ plugin: 'claudify', key: 'limits' } as const, [])
+const weekStart = atom({ plugin: 'claudify', key: 'weekStart' } as const, null)
 
 // ——— The project: the "dev" and "start" buttons and the checks ———
 
@@ -81,6 +82,9 @@ async function readProject($: EngineInterface): Promise<void> {
 /** Keeps the rate-limit windows the band draws. */
 async function setLimits($: EngineInterface, rateLimits: readonly UsageLimit[]): Promise<void> {
   await update($, limits, () => rateLimits.map(l => ({ kind: l.kind, percentUsed: l.percentUsed, ...(l.resetsAt ? { resetsAt: l.resetsAt } : {}) })))
+  // The weekly reading this session started from: taken on the first reading, and again when the week resets.
+  const week = rateLimits.find(l => l.kind === 'seven_day')
+  if (week) await update($, weekStart, base => (!base || week.percentUsed < base.percentUsed || Date.parse(week.resetsAt ?? '') - Date.parse(base.resetsAt ?? '') > 3_600_000 ? { kind: week.kind, percentUsed: week.percentUsed, ...(week.resetsAt ? { resetsAt: week.resetsAt } : {}) } : base))
 }
 
 /** Ends a script's whole process tree (on Windows, killing only the parent leaves Vite and Electron alive). */
@@ -262,7 +266,7 @@ const BAR = 8
  * off); on the right a dot for each check (GitHub, graphify, Ponytail) and the 5-hour and weekly limit
  * bars; then what the scripts and the GitHub flow report.
  */
-function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns: Record<string, ScriptRun>, gh: GithubFlow, usage: UsageLimit[]) {
+function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns: Record<string, ScriptRun>, gh: GithubFlow, usage: UsageLimit[], base: UsageLimit | null) {
   const { Box, Button, Text } = ui
   // Start Project runs the dev script, or the start script when there is no dev.
   const mainScript = proj.names.includes('dev') ? 'dev' : proj.names.includes('start') ? 'start' : (proj.names[0] ?? null)
@@ -300,6 +304,9 @@ function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns:
     const full = Math.round((used / 100) * BAR)
     return [{ label, used, bar: '█'.repeat(full) + '░'.repeat(BAR - full) }]
   })
+  // How much of the week this session has used: the weekly reading less the one it started from.
+  const week = usage.find(x => x.kind === 'seven_day')
+  const session = week && base && !(week.resetsAt && Date.parse(week.resetsAt) <= now) ? Math.max(0, week.percentUsed - base.percentUsed) : null
   return (
     <Box flexDirection="column">
       <Box flexDirection="row" justifyContent="space-between" gap={1} flexWrap="wrap">
@@ -319,6 +326,7 @@ function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns:
               {`${b.label} ${b.bar} ${Math.round(b.used)}%`}
             </Text>
           ))}
+          {session !== null && <Text dimColor>{`Session +${Number(session.toFixed(1))}%`}</Text>}
         </Box>
       </Box>
     {proj.names.map(name => {
@@ -395,7 +403,8 @@ export const register: Register = on => {
     const scriptRuns = await read($, runs)
     const gh = await read($, github)
     const usage = await read($, limits)
-    return <Box flexDirection="column">{actionBar($, $.ui.resolve(e), proj, scriptRuns, gh, usage)}</Box>
+    const base = await read($, weekStart)
+    return <Box flexDirection="column">{actionBar($, $.ui.resolve(e), proj, scriptRuns, gh, usage, base)}</Box>
   })
 
   // The limit bars follow the windows as the engine measures them.
@@ -407,6 +416,8 @@ export const register: Register = on => {
   // When the session ends, whatever the buttons left running is ended too.
   on('session.end', async ($, e, next) => {
     for (const run of Object.values(await read($, runs))) if (run.status !== 'exited' && run.pid) await killTree($, run.pid)
+    // A /clear starts the session's weekly count over: the next reading is its new start.
+    if (e.reason === 'clear') await update($, weekStart, () => null)
     return next(e)
   })
 

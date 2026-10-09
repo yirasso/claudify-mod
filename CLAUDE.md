@@ -1,6 +1,6 @@
 # Claudify plugin
 
-A Claude Code plugin (a "mod": function hooks, no MCP server) with one part: the **band above the prompt** with the action buttons on the left (Start/Stop Project; Save Changes only while something waits to go to GitHub; Setup Project only while GitHub, graphify or Ponytail is off) and, aligned right, a dot for each check (green ● on, dim ○ off) and the 5-hour and weekly limit bars, and the script output and the GitHub confirm flow under them.
+A Claude Code plugin (a "mod": function hooks, no MCP server) with one part: the **band above the prompt** with the action buttons on the left (Start/Stop Project; Save Changes only while something waits to go to GitHub; Setup Project only while GitHub, graphify or Ponytail is off) and, aligned right, a dot for each check (green ● on, dim ○ off) the 5-hour and weekly limit bars and how much of the week this session used, and the script output and the GitHub confirm flow under them.
 
 The pane with the session's skills, MCP servers, connectors and plugins moved on 2026-10-09 to its own plugin, `setup-info`, in `C:\Dev\Claude Setup Info`.
 
@@ -26,7 +26,7 @@ The owner is Tomás. He talks in European Portuguese (never Brazilian); the plug
   - **Events handled:** `session.start`, `turn.complete`, `ui.render` (`AbovePrompt`), `session.measure` (the limit bars), `session.end`.
   - **What it renders:** `AbovePrompt` (the band: `actionBar`).
   - **Its functions:** `readProject` (every 10 s, via `$.clock.every`), `runScript`/`stopScript`/`killTree`, `prepareGithub`/`runGithub` (the commit message comes from `$.model.complete` with Haiku 5.5 at medium effort, and nothing runs before the user confirms), `actionBar`.
-- `types/index.d.ts`: the state contract (`PluginState`). The atoms are `project` (with `pending`: something to send to GitHub), `runs`, `github` and `limits`.
+- `types/index.d.ts`: the state contract (`PluginState`). The atoms are `project` (with `pending`: something to send to GitHub), `runs`, `github`, `limits` and `weekStart` (the weekly reading the session started from: «Session +N%» is the week minus it; a weekly reset or `/clear` starts it over).
 - `tests/`: `actions`, `checks`, `github`, `scripts`.
 
 ## Rules learned the hard way

@@ -44,6 +44,8 @@ declare module 'claude-code' {
       github: GithubFlow
       /** The account's rate-limit windows, as the last response reported them. */
       limits: UsageLimit[]
+      /** The weekly window as this session (or the week, if it reset since) first read it; null until then. */
+      weekStart: UsageLimit | null
     }
   }
 }

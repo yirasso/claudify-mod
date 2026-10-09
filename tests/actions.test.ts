@@ -36,3 +36,32 @@ for (const dirty of [true, false]) {
     expect(shown).toContain('Week ███████░ 93%')
   })
 }
+
+test('the band: the week this session used, started over by a weekly reset and by /clear', async ($, on) => {
+  on('fs.read', async () => ({ value: '{}' }))
+  on('fs.exists', async () => ({ value: false }))
+  on('fs.list', async () => ({ value: [] }) as never)
+  on('settings.read', async () => ({ value: {} }) as never)
+  on('session.cwd', async () => ({ value: 'C:/Dev/Nau' }))
+  on('process.run', async () => ({ value: { exitCode: 1, stdout: '', stderr: '' } }) as never)
+  on('session.usage', async () => ({ value: { startedAt: 0, context: {}, rateLimits: [{ kind: 'seven_day', percentUsed: 40, resetsAt: '2099-01-08T00:00:00Z' }] } }) as never)
+  on('session.measure', async (_$: unknown, e: { changed: string[] }) => ({ changed: e.changed }) as never)
+  on('session.end', async () => ({ sessionId: 's' }) as never)
+  on('session.start', async () => ({ cwd: 'C:/Dev/Nau' }) as never)
+  const week = (percentUsed: number, resetsAt: string) => $.session.measure({ context: {}, rateLimits: [{ kind: 'seven_day', percentUsed, resetsAt }], changed: ['rateLimits'] } as never)
+
+  await $.session.start({ cwd: 'C:/Dev/Nau', surface: 'desktop', isInteractive: true } as never)
+  const band = await $.ui.mount({ plugin: 'claudify', surface: 'desktop', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false } as never })
+  const shown = async () => (await band.findAll({ type: 'Text' })).map(t => t.text).join('\n')
+  expect(await shown()).toContain('Session +0%')
+  await week(43.5, '2099-01-08T00:00:00Z')
+  expect(await shown()).toContain('Session +3.5%')
+  // The week resets: the count starts over from the new week's reading.
+  await week(1, '2099-01-15T00:00:00Z')
+  await week(2, '2099-01-15T00:00:00Z')
+  expect(await shown()).toContain('Session +1%')
+  // A /clear starts it over too.
+  await $.session.end({ reason: 'clear', sessionId: 's', resume: {} } as never)
+  await week(5, '2099-01-15T00:00:00Z')
+  expect(await shown()).toContain('Session +0%')
+})
