@@ -7,7 +7,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { GithubFlow, GithubPlan, GraphJob, ProjectScripts, ScriptRun, StartCommand, TypeCheck, UsageLimit } from '../types'
 
-const project = atom({ plugin: 'claudify', key: 'project' } as const, { start: null, install: null, graphify: null, graphStale: false, github: null, branch: null, ponytail: null, git: true, pending: false, behind: 0, changed: 0, lastCommit: null })
+const project = atom({ plugin: 'claudify', key: 'project' } as const, { start: null, install: null, build: null, graphify: null, graphStale: false, github: null, branch: null, ponytail: null, git: true, pending: false, behind: 0, changed: 0, lastCommit: null })
 const runs = atom({ plugin: 'claudify', key: 'runs' } as const, {})
 const github = atom({ plugin: 'claudify', key: 'github' } as const, { phase: 'idle', plan: 'push', log: [] })
 const limits = atom({ plugin: 'claudify', key: 'limits' } as const, [])
@@ -49,6 +49,7 @@ async function startCommand($: EngineInterface, cwd: string): Promise<StartComma
     if (pkg.dependencies?.expo || pkg.devDependencies?.expo) return { name: 'expo', cmd: 'npx expo start' }
   }
   if (await has('Cargo.toml')) return { name: 'cargo', cmd: 'cargo run' }
+
   if (await has('go.mod')) return { name: 'go', cmd: 'go run .' }
   const python = (await has('uv.lock')) ? 'uv run python' : 'python'
   if (await has('manage.py')) return { name: 'django', cmd: `${python} manage.py runserver` }
@@ -299,6 +300,21 @@ async function ignoreGraphOutput($: EngineInterface): Promise<void> {
   await $.fs.write(file, `${text}${text && !text.endsWith('\n') ? '\n' : ''}graphify-out/\n`)
 }
 
+/** The project's build: its package.json `build` script (by the lockfile's package manager), or cargo build. */
+async function buildCommand($: EngineInterface, cwd: string): Promise<string | null> {
+  try {
+    const pkg = JSON.parse(await $.fs.read(`${cwd}/package.json`)) as { scripts?: Record<string, unknown> }
+    if (typeof pkg.scripts?.build === 'string') {
+      const has = (file: string) => $.fs.exists(`${cwd}/${file}`).catch(() => false)
+      const pm = (await has('pnpm-lock.yaml')) ? 'pnpm' : (await has('yarn.lock')) ? 'yarn' : (await has('bun.lockb')) || (await has('bun.lock')) ? 'bun' : 'npm'
+      return `${pm} run build`
+    }
+  } catch {
+    // No package.json.
+  }
+  return (await $.fs.exists(`${cwd}/Cargo.toml`).catch(() => false)) ? 'cargo build --release' : null
+}
+
 /**
  * The install a project needs: its manifest or lockfile is newer than what was installed (node_modules' own
  * record of the last install, or .venv for uv), or nothing is installed yet. Returns the command, or null.
@@ -337,6 +353,7 @@ async function readProject($: EngineInterface): Promise<void> {
   const cwd = await $.session.cwd().catch(() => '.')
   const start = await startCommand($, cwd)
   const install = await installCommand($, cwd)
+  const build = await buildCommand($, cwd)
   const outDir = `${cwd}/graphify-out`
   const graph = (await $.fs.list(outDir).catch(() => [])).find(x => x.name === 'graph.json' && x.kind === 'file')
   // GitHub: the origin remote points at a github.com repository.
@@ -376,7 +393,7 @@ async function readProject($: EngineInterface): Promise<void> {
   const codeStale = graphify !== null && isRepo && (await git('log', `--since=@${Math.floor(graphify / 1000)}`, '--format=%H', '--', '.', ':(exclude)graphify-out', ':(exclude).gitignore')) !== ''
   const docsWaiting = graphify !== null && Number((await $.fs.read(`${cwd}/${DOCS_SINCE}`).catch(() => '')).trim()) > 0
   const graphStale = codeStale || docsWaiting
-  await update($, project, () => ({ start, install, graphify, graphStale, github: repo, branch, ponytail, git: isRepo, pending, behind, changed, lastCommit }))
+  await update($, project, () => ({ start, install, build, graphify, graphStale, github: repo, branch, ponytail, git: isRepo, pending, behind, changed, lastCommit }))
 }
 
 /** Keeps the rate-limit windows the band draws. */
@@ -725,7 +742,15 @@ async function runGithub($: EngineInterface): Promise<void> {
   }
   if (flow.plan === 'push') {
     const upstream = (await sh($, ['git', 'rev-parse', '--abbrev-ref', '@{u}'])).exitCode === 0
-    if (!(await step('git push', upstream ? ['git', 'push'] : ['git', 'push', '-u', 'origin', 'HEAD']))) return
+    if (!(await step('git push', upstream ? ['git', 'push'] : ['git', 'push', '-u', 'origin', 'HEAD']))) {
+      // Refused because GitHub has newer commits: fetch, so ↓ Pull shows; the commit is kept, push again after.
+      if (log.some(l => /rejected|fetch first|non-fast-forward/i.test(l))) {
+        log.push('GitHub has newer commits: Pull, then Save Changes again.')
+        await update($, github, (all): GithubFlow => ({ ...all, log: [...log] }))
+        await fetchRemote($)
+      }
+      return
+    }
   } else {
     // A repo with another remote already called origin keeps it; GitHub goes in as "github".
     const hasOrigin = (await sh($, ['git', 'remote'])).stdout.split('\n').includes('origin')
@@ -762,13 +787,32 @@ async function undoSave($: EngineInterface): Promise<void> {
 
 /** The Pull button: fast-forwards the branch to what GitHub has, reporting in the GitHub flow's lines. */
 async function pullChanges($: EngineInterface): Promise<void> {
-  await update($, github, (): GithubFlow => ({ phase: 'working', plan: 'push', log: ['> git pull --ff-only'] }))
-  const r = await sh($, ['git', 'pull', '--ff-only'])
-  const log = ['> git pull --ff-only', ...`${r.stdout}\n${r.stderr}`.trim().split('\n').filter(Boolean).slice(-3)]
-  await update($, github, (): GithubFlow => ({ phase: r.exitCode === 0 ? 'done' : 'error', plan: 'push', log }))
-  collapseSoon($)
+  // Local changes and local commits too: they are set aside, the pull rebases on GitHub's, and they come back.
+  const label = '> git pull --rebase --autostash'
+  await update($, github, (): GithubFlow => ({ phase: 'working', plan: 'push', log: [label] }))
+  const r = await sh($, ['git', 'pull', '--rebase', '--autostash'])
+  const log = [label, ...`${r.stdout}\n${r.stderr}`.trim().split('\n').filter(Boolean).slice(-3)]
+  const conflicts = r.exitCode === 0 ? [] : await conflictedFiles($)
+  await update($, github, (): GithubFlow => ({ phase: r.exitCode === 0 ? 'done' : 'error', plan: 'push', log, ...(conflicts.length ? { conflicts } : {}) }))
+  // A conflict stays until it is dealt with; anything else folds back.
+  if (!conflicts.length) collapseSoon($)
   if (r.exitCode === 0) await refreshCodeGraph($)
   else await readProject($)
+}
+
+/** The files git left in conflict (a rebase or a merge that stopped), names only. */
+async function conflictedFiles($: EngineInterface): Promise<string[]> {
+  return (await sh($, ['git', 'diff', '--name-only', '--diff-filter=U'])).stdout.split('\n').map(f => f.trim()).filter(Boolean).slice(0, 20)
+}
+
+/** Sends the conflict to Claude: the files, and what to do once they are resolved. */
+async function sendConflicts($: EngineInterface): Promise<void> {
+  const files = (await read($, github)).conflicts ?? (await conflictedFiles($))
+  if (!files.length) return
+  await update($, github, (): GithubFlow => ({ phase: 'idle', plan: 'push', log: [] }))
+  await $.prompt.submit({
+    text: `A git pull (--rebase --autostash) stopped on conflicts in:\n${files.map(f => `- ${f}`).join('\n')}\n\nResolve each conflict keeping both sides' intent, then stage the files and run \`git rebase --continue\` until the rebase is done (if a stash was left, \`git stash pop\`), and tell me what you chose where it was not obvious.`,
+  })
 }
 
 /** Asks GitHub what it has (quietly), so the Pull button knows; then reads the project again. */
@@ -836,6 +880,11 @@ function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns:
   const installButton = installCmd && scriptRuns.install?.status !== 'running' && scriptRuns.install?.status !== 'stopping' && (
     <Button key="script:install" variant="secondary" label="⬇ Install deps" onPress={() => void runScript($, 'install', installCmd).then(() => readProject($))} />
   )
+  // Build is there for a project with a build, and not while one runs.
+  const buildCmd = proj.build
+  const buildButton = buildCmd && scriptRuns.build?.status !== 'running' && scriptRuns.build?.status !== 'stopping' && (
+    <Button key="script:build" variant="secondary" label="⚒ Build" onPress={() => void runScript($, 'build', buildCmd)} />
+  )
   // Pull is there while GitHub has commits the branch does not, and not while the GitHub flow runs.
   const pullButton = proj.behind > 0 && (gh.phase === 'idle' || gh.phase === 'done' || gh.phase === 'error') && (
     <Button key="github:pull" variant="secondary" label={`↓ Pull (${proj.behind})`} onPress={() => void pullChanges($)} />
@@ -866,6 +915,7 @@ function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns:
         <Box flexDirection="row" gap={1}>
           {startButton}
           {installButton}
+          {buildButton}
           {pullButton}
           {saveButton}
           {setupButton}
@@ -971,6 +1021,12 @@ function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns:
         </Text>
       ))}
     {gh.phase === 'done' && gh.url && <Text color="suggestion">{`  ${gh.url}`}</Text>}
+    {gh.phase === 'error' && gh.conflicts?.length ? (
+      <Box flexDirection="row" gap={1}>
+        <Text color="error" wrap="truncate-end">{`  Conflicts: ${gh.conflicts.join(', ')}`}</Text>
+        <Button key="github:conflicts" variant="primary" label="✦ Resolve conflicts with Claude" onPress={() => void sendConflicts($)} />
+      </Box>
+    ) : null}
     {gh.phase === 'done' && gh.undo && <Button key="github:undo" variant="secondary" label="↶ Undo" onPress={() => void undoSave($)} />}
     </Box>
   )

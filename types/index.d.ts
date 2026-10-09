@@ -13,14 +13,15 @@ export type ScriptRun = {
 export type StartCommand = { name: string; cmd: string }
 
 /**
- * The session's project: what Start Project runs (or null); the install command it needs (or null); when the graphify graph was built (graph.json's date,
+ * The session's project: what Start Project runs (or null); the install command it needs (or null); its build command
+ * (or null); when the graphify graph was built (graph.json's date,
  * or null without it) and whether commits or docs left out since make it out of date; the GitHub repository of the
  * `origin` remote (`owner/repo`, or null) and the current branch; the enabled Ponytail plugin's id, or null;
  * whether there is something to send to GitHub (changed files, unpushed commits, or a repo not on GitHub yet), and
  * how many commits GitHub has that the branch does not (as of the last fetch); how many files wait to be committed,
  * and when the last commit was made (ms), for the commit reminder.
  */
-export type ProjectScripts = { start: StartCommand | null; install: string | null; graphify: number | null; graphStale: boolean; github: string | null; branch: string | null; ponytail: string | null; git: boolean; pending: boolean; behind: number; changed: number; lastCommit: number | null }
+export type ProjectScripts = { start: StartCommand | null; install: string | null; build: string | null; graphify: number | null; graphStale: boolean; github: string | null; branch: string | null; ponytail: string | null; git: boolean; pending: boolean; behind: number; changed: number; lastCommit: number | null }
 
 /** A rate-limit window: `five_hour` or `seven_day`, how much of it is used (0 to 100) and when it resets. */
 export type UsageLimit = { kind: string; percentUsed: number; resetsAt?: string }
@@ -37,6 +38,8 @@ export type GithubFlow = {
   ahead?: number
   target?: string
   url?: string
+  /** Files a pull left in conflict, offered to Claude. */
+  conflicts?: string[]
   /** Changed files that look secret (names only), shown before the person confirms. */
   secrets?: string[]
   /** The commit the last Save Changes made, while Undo is offered. */
