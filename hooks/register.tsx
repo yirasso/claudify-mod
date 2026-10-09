@@ -517,16 +517,10 @@ async function toggleNotify($: EngineInterface): Promise<void> {
 /** Opens the session folder in the file manager. */
 async function openFolder($: EngineInterface): Promise<void> {
   const cwd = await $.session.cwd()
-  if ((await $.env.get('OS')) === 'Windows_NT') {
-    // Explorer opened this way lives as long as its window: waiting for it (process.run) timed out and the
-    // timeout killed the window. Spawned, and left to run on its own.
-    const child = $.process.spawn({ argv: ['explorer.exe', cwd.replace(/\//g, '\\')] })
-    void (async () => {
-      while (!(await child.next()).done) {
-        // Its output is not needed.
-      }
-    })().catch(() => undefined)
-  } else if ((await sh($, ['open', cwd])).exitCode !== 0) await sh($, ['xdg-open', cwd])
+  // explorer.exe started by the engine never shows a window (tried run, spawn and Invoke-Item); the shell's own
+  // FileProtocolHandler, the one ↗ Open uses, opens the folder and returns at once.
+  if ((await $.env.get('OS')) === 'Windows_NT') await sh($, ['rundll32.exe', 'url.dll,FileProtocolHandler', cwd.replace(/\//g, '\\')])
+  else if ((await sh($, ['open', cwd])).exitCode !== 0) await sh($, ['xdg-open', cwd])
 }
 
 /**
