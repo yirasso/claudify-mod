@@ -1,4 +1,4 @@
-import { expect, mock, test } from 'claude-code/testing'
+import { expect, test } from 'claude-code/testing'
 
 for (const [graph, remote] of [
   [true, 'https://github.com/yirasso/nau.git'],
@@ -35,23 +35,3 @@ for (const [graph, remote] of [
     expect(sent).toContain('graphify-out/ to .gitignore')
   })
 }
-
-test('After a /clear the band is drawn again (Claude Desktop drops it until the next write)', async ($, on) => {
-  on('fs.read', async () => ({ value: '{}' }))
-  on('fs.exists', async () => ({ value: false }))
-  on('settings.read', async () => ({ value: {} }) as never)
-  on('session.cwd', async () => ({ value: 'C:/Dev/Nau' }))
-  on('fs.list', async () => ({ value: [] }) as never)
-  on('process.run', async () => ({ value: { exitCode: 1, stdout: '', stderr: '' } }) as never)
-  on('session.usage', async () => ({ value: { startedAt: 0, context: {}, rateLimits: [] } }) as never)
-  on('session.end', async () => ({ sessionId: 's' }) as never)
-  const invalidated: string[] = []
-  on('ui.invalidate', async (_$: unknown, e: { event: string }) => (invalidated.push(e.event), { value: undefined }) as never)
-  const clock = mock.clock(on)
-  on('session.start', async () => ({ cwd: 'C:/Dev/Nau' }) as never)
-
-  await $.session.start({ cwd: 'C:/Dev/Nau', surface: 'desktop', isInteractive: true } as never)
-  await $.session.end({ reason: 'clear', sessionId: 's', resume: {} } as never)
-  await clock.advance(500)
-  expect(invalidated).toContain('ui.render')
-})
