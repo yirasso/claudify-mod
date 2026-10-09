@@ -1,7 +1,13 @@
 {
   "name": "tomas-plugins",
-  "owner": { "name": "Tomas Girao" },
+  "owner": {
+    "name": "Tomas Girao"
+  },
   "plugins": [
-    { "name": "claudify", "source": "./", "description": "Project actions in a band above the prompt: start, save to GitHub, set up, and GitHub/graphify/Ponytail status" }
+    {
+      "name": "claudify",
+      "source": "./",
+      "description": "Your project's everyday actions in a band above the prompt: start, save to GitHub, pull, build, a graph and typecheck that follow your work, and your usage limits."
+    }
   ]
 }
