@@ -47,10 +47,10 @@ for (const c of CASES) {
     const ui = await $.ui.mount({ plugin: 'claudify', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false } as never })
     expect((await ui.find({ key: 'github:start' }))?.text).toContain(c.button)
 
-    // First press: Sonnet writes the message, and nothing changes until the person confirms.
+    // First press: Haiku writes the message, and nothing changes until the person confirms.
     ran.length = 0
     await ui.press({ key: 'github:start' })
-    expect(model).toBe('claude-sonnet-5-5')
+    expect(model).toBe('claude-haiku-5-5')
     expect(ran.some(r => r.startsWith('git commit') || r.startsWith('git push') || r.startsWith('gh repo create') || r === 'git init')).toBe(false)
     const shown = (await ui.findAll({ type: 'Text' })).map(t => t.text).join('\n')
     expect(shown).toContain('Add the app shell')

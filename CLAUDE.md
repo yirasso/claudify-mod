@@ -25,7 +25,7 @@ The owner is Tomás. He talks in European Portuguese (never Brazilian); the plug
 - `hooks/register.tsx`: every hook.
   - **Events handled:** `session.start`, `turn.complete`, `ui.render` (`AbovePrompt`), `session.measure` (the limit bars), `session.end`.
   - **What it renders:** `AbovePrompt` (the band: `actionBar`).
-  - **Its functions:** `readProject` (every 10 s, via `$.clock.every`), `runScript`/`stopScript`/`killTree`, `prepareGithub`/`runGithub` (the commit message comes from `$.model.complete` with Sonnet 5.5 at medium effort, and nothing runs before the user confirms), `actionBar`.
+  - **Its functions:** `readProject` (every 10 s, via `$.clock.every`), `runScript`/`stopScript`/`killTree`, `prepareGithub`/`runGithub` (the commit message comes from `$.model.complete` with Haiku 5.5 at medium effort, and nothing runs before the user confirms), `actionBar`.
 - `types/index.d.ts`: the state contract (`PluginState`). The atoms are `project` (with `pending`: something to send to GitHub), `runs`, `github` and `limits`.
 - `tests/`: `actions`, `checks`, `github`, `scripts`.
 

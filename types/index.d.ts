@@ -21,7 +21,7 @@ export type UsageLimit = { kind: string; percentUsed: number; resetsAt?: string 
 /** What the GitHub button does: a new repo (no git yet), publish an existing repo, or commit and push. */
 export type GithubPlan = 'create' | 'publish' | 'push'
 
-/** The GitHub button's flow: preparing (Sonnet writes the message), waiting to confirm, working, and the end. */
+/** The GitHub button's flow: preparing (Haiku writes the message), waiting to confirm, working, and the end. */
 export type GithubFlow = {
   phase: 'idle' | 'preparing' | 'confirm' | 'working' | 'done' | 'error'
   plan: GithubPlan

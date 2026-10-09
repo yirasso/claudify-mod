@@ -146,8 +146,8 @@ async function stopScript($: EngineInterface, name: string): Promise<void> {
 
 // ——— The GitHub button: create the repo, publish it, or just commit and push ———
 
-/** The model that writes the commit message (always Sonnet 5.5 at medium effort). */
-const COMMIT_MODEL = 'claude-sonnet-5-5'
+/** The model that writes the commit message (always Haiku 5.5 at medium effort). */
+const COMMIT_MODEL = 'claude-haiku-5-5'
 const DIFF_CHARS = 24_000
 
 /** Runs git or gh in the session folder; resolves the result, or a failed one when it cannot start. */
@@ -164,7 +164,7 @@ async function repoName($: EngineInterface): Promise<string> {
 
 /**
  * Step 1 of the button: works out what it will do (create, publish or push), gathers what changed and has
- * Sonnet write the commit message, then waits for the person to confirm.
+ * Haiku write the commit message, then waits for the person to confirm.
  */
 async function prepareGithub($: EngineInterface): Promise<void> {
   await update($, github, (): GithubFlow => ({ phase: 'preparing', plan: 'push', log: [] }))
@@ -203,7 +203,7 @@ async function prepareGithub($: EngineInterface): Promise<void> {
     })
     message = reply.isAnswered ? reply.text.trim().replace(/^```\w*\n?|```$/g, '').trim() : ''
     if (!message) {
-      await update($, github, (): GithubFlow => ({ phase: 'error', plan, log: [`Sonnet did not write a message (${reply.isAnswered ? 'empty reply' : reply.reason}).`] }))
+      await update($, github, (): GithubFlow => ({ phase: 'error', plan, log: [`Haiku did not write a message (${reply.isAnswered ? 'empty reply' : reply.reason}).`] }))
       return
     }
   }
@@ -342,7 +342,7 @@ function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns:
         </Box>
       )
     })}
-    {gh.phase === 'preparing' && <Text dimColor>Sonnet is writing the commit message…</Text>}
+    {gh.phase === 'preparing' && <Text dimColor>Haiku is writing the commit message…</Text>}
     {gh.phase === 'confirm' && (
       <Box flexDirection="column">
         <Text>
