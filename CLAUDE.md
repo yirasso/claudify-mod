@@ -42,6 +42,7 @@ The owner is Tomás. He talks in European Portuguese (never Brazilian); the plug
 - **Pull** runs `git pull --rebase --autostash` (local changes and commits come back on top); if it stops on conflicts, **✦ Resolve conflicts with Claude** sends the files. A push GitHub refuses (newer commits) fetches so ↓ Pull shows.
 - **⚒ Build** runs the `build` script (or `cargo build --release`) as a run like Start Project's, with Send error when it fails.
 - **A health line** (`checkHealth`, once per load) says what the band needs and is missing: git, `gh` or its login, graphify.
+- **The graph needs its rule** (`graphRule`, `installGraphRule`): a graph Claude is not told to read goes unused. The graphify dot is green only with graph.json **and** a `## graphify` section in the project's CLAUDE.md; without the section it is yellow and Setup Project shows, which runs `graphify claude install` and then moves graphify's PreToolUse hooks (they name its path on this machine) from `.claude/settings.json` to the git-ignored `.claude/settings.local.json`.
 - **Commits and the band are always in English.**
 - **Finished work folds back after 2 s** (`collapseSoon`): the GitHub flow's lines, a graph failure, and runs that ended. A failed run with a button (Send error, Free port) stays.
 

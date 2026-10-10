@@ -11,6 +11,8 @@ for (const [graph, remote] of [
       'C:/Users/T/.claude/skills/graphify/references/extraction-spec.md': '# spec\n\n```\nFiles (chunk CHUNK_NUM of TOTAL_CHUNKS):\nFILE_LIST\n```\n',
       'C:/Dev/Nau/README.md': '# Nau\nA boat.',
       'C:/Dev/Nau/docs/guide.md': '# Guide',
+      // With everything set up, CLAUDE.md already has graphify's rule.
+      ...(graph ? { 'C:/Dev/Nau/CLAUDE.md': '# Nau\n\n## graphify\n\nRules: ...\n' } : {}),
     }
     const key = (path: string) => path.replace(/\\/g, '/')
     on('fs.read', async (_$: unknown, e: { path: string }) => (key(e.path) in files ? { value: files[key(e.path)] } : { deny: 'ENOENT' }) as never)
@@ -27,6 +29,14 @@ for (const [graph, remote] of [
       const ok = (stdout = '') => ({ value: { exitCode: 0, stdout, stderr: '' } }) as never
       if (cmd === 'graphify update .') return ok('Code graph updated.\n')
       if (cmd.includes('graph_docs.py')) return ok('12 nodes\n')
+      // graphify writes its rule into CLAUDE.md and its hooks (with this machine's path) into settings.json.
+      if (cmd === 'graphify claude install') {
+        files['C:/Dev/Nau/CLAUDE.md'] = '## graphify\n\nRules: ...\n'
+        const settings = JSON.parse(files['C:/Dev/Nau/.claude/settings.json'] ?? '{}')
+        files['C:/Dev/Nau/.claude/settings.json'] = JSON.stringify({ ...settings, hooks: { PreToolUse: [{ matcher: 'Bash|Grep', hooks: [{ type: 'command', command: '"C:/Users/T/.local/bin/graphify.EXE" hook-guard search' }] }] } })
+        return ok()
+      }
+      if (cmd === 'git check-ignore -q .claude/settings.local.json') return { value: { exitCode: 1, stdout: '', stderr: '' } } as never
       if (cmd === 'git ls-files') return ok('README.md\nsrc/main.ts\ndocs/guide.md\n')
       if (cmd.includes('remote get-url')) return { value: { exitCode: remote ? 0 : 2, stdout: remote, stderr: '' } } as never
       if (cmd.includes('rev-parse')) return ok(graph ? 'main\n' : 'false\n')
@@ -50,7 +60,13 @@ for (const [graph, remote] of [
     await ui.press({ key: 'project:setup' })
     // Ponytail on in the project's settings, graphify-out/ ignored, the code graph built with no model.
     expect(JSON.parse(files['C:/Dev/Nau/.claude/settings.json'] ?? '{}').enabledPlugins).toEqual({ 'ponytail@ponytail': true })
-    expect(files['C:/Dev/Nau/.gitignore']).toBe('node_modules/\ngraphify-out/\n')
+    expect(files['C:/Dev/Nau/.gitignore']).toBe('node_modules/\ngraphify-out/\n.claude/settings.local.json\n')
+    // The rule telling Claude to read the graph is in CLAUDE.md; graphify's hooks, which name this machine's path,
+    // moved from the shared settings to the local ones.
+    expect(ran).toContain('graphify claude install')
+    expect(files['C:/Dev/Nau/CLAUDE.md']).toContain('## graphify')
+    expect(files['C:/Dev/Nau/.claude/settings.json']).not.toContain('graphify.EXE')
+    expect(files['C:/Dev/Nau/.claude/settings.local.json']).toContain('hook-guard search')
     expect(ran).toContain('graphify update .')
     // Only the docs go to Sonnet, as text with the skill's spec; graph_docs.py merges what it returned.
     const docsAsk = asked.find(a => a.prompt.includes('Files (chunk 1 of 1)'))

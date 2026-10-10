@@ -7,7 +7,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { GithubFlow, GithubPlan, GraphJob, ProjectScripts, ScriptRun, StartCommand, TypeCheck, UsageLimit } from '../types'
 
-const project = atom({ plugin: 'claudify', key: 'project' } as const, { start: null, install: null, build: null, graphify: null, graphStale: false, github: null, branch: null, ponytail: null, git: true, pending: false, behind: 0, changed: 0, lastCommit: null })
+const project = atom({ plugin: 'claudify', key: 'project' } as const, { start: null, install: null, build: null, graphify: null, graphStale: false, graphRule: false, github: null, branch: null, ponytail: null, git: true, pending: false, behind: 0, changed: 0, lastCommit: null })
 const runs = atom({ plugin: 'claudify', key: 'runs' } as const, {})
 const github = atom({ plugin: 'claudify', key: 'github' } as const, { phase: 'idle', plan: 'push', log: [] })
 const limits = atom({ plugin: 'claudify', key: 'limits' } as const, [])
@@ -73,6 +73,7 @@ async function setupProject($: EngineInterface): Promise<void> {
   const p = await read($, project)
   if (!p.ponytail) await enablePonytail($)
   if (p.graphify === null) await updateGraph($)
+  if (!p.graphRule) await installGraphRule($)
   if (!p.github) await prepareGithub($, SETUP_MODEL)
   await readProject($)
 }
@@ -311,6 +312,38 @@ async function followTurn($: EngineInterface): Promise<void> {
   await updateGraph($, { docs: false })
 }
 
+/**
+ * A graph nobody is told to read is not used: `graphify claude install` writes the "## graphify" rule into the
+ * project's CLAUDE.md and PreToolUse hooks into .claude/settings.json. Those hooks name graphify's path on this
+ * machine, so they move to .claude/settings.local.json, which stays out of git.
+ */
+async function installGraphRule($: EngineInterface): Promise<void> {
+  const installed = await sh($, ['graphify', 'claude', 'install'])
+  if (installed.exitCode !== 0) return graphFailed($, `graphify claude install failed: ${lastLine(installed.stderr || installed.stdout)}`)
+  const cwd = await $.session.cwd()
+  type Hook = { hooks?: { command?: string }[] }
+  type Settings = { hooks?: { PreToolUse?: Hook[] } & Record<string, unknown> } & Record<string, unknown>
+  const readJson = async (file: string): Promise<Settings> => JSON.parse(await $.fs.read(file).catch(() => '{}')) as Settings
+  const shared = await readJson(`${cwd}/.claude/settings.json`).catch((): Settings => ({}))
+  const isGraphify = (h: Hook) => (h.hooks ?? []).some(x => /graphify/i.test(x.command ?? ''))
+  const mine = (shared.hooks?.PreToolUse ?? []).filter(isGraphify)
+  if (!mine.length) return
+  const local = await readJson(`${cwd}/.claude/settings.local.json`).catch((): Settings => ({}))
+  const localHooks = { ...(local.hooks ?? {}), PreToolUse: [...(local.hooks?.PreToolUse ?? []).filter(h => !isGraphify(h)), ...mine] }
+  await $.fs.write(`${cwd}/.claude/settings.local.json`, JSON.stringify({ ...local, hooks: localHooks }, null, 2) + '\n')
+  const rest = (shared.hooks?.PreToolUse ?? []).filter(h => !isGraphify(h))
+  const sharedHooks: Record<string, unknown> = { ...(shared.hooks ?? {}) }
+  if (rest.length) sharedHooks.PreToolUse = rest
+  else delete sharedHooks.PreToolUse
+  const { hooks: _dropped, ...sharedRest } = shared
+  await $.fs.write(`${cwd}/.claude/settings.json`, JSON.stringify(Object.keys(sharedHooks).length ? { ...sharedRest, hooks: sharedHooks } : sharedRest, null, 2) + '\n')
+  // The local settings must not reach git.
+  if ((await sh($, ['git', 'check-ignore', '-q', '.claude/settings.local.json'])).exitCode === 1) {
+    const ignore = await $.fs.read(`${cwd}/.gitignore`).catch(() => '')
+    await $.fs.write(`${cwd}/.gitignore`, `${ignore}${ignore && !ignore.endsWith('\n') ? '\n' : ''}.claude/settings.local.json\n`)
+  }
+}
+
 /** Adds graphify-out/ to .gitignore (creating it) unless it is there. */
 async function ignoreGraphOutput($: EngineInterface): Promise<void> {
   const file = `${await $.session.cwd()}/.gitignore`
@@ -403,6 +436,8 @@ async function readProject($: EngineInterface): Promise<void> {
   }
   // Ponytail: the plugin enabled in the merged settings (user, project or local).
   const settings = (await $.settings.read().catch(() => ({}))) as { enabledPlugins?: Record<string, unknown> }
+  // The rule that makes Claude read the graph: graphify's own section in the project's CLAUDE.md.
+  const graphRule = /^## graphify\s*$/m.test(await $.fs.read(`${cwd}/CLAUDE.md`).catch(() => ''))
   const ponytail = Object.entries(settings.enabledPlugins ?? {}).find(([id, on]) => id.startsWith('ponytail@') && on === true)?.[0] ?? null
   // An empty graph.json is a build that failed: it does not count.
   const graphify = graph && graph.size > 0 ? graph.mtimeMs : null
@@ -413,7 +448,7 @@ async function readProject($: EngineInterface): Promise<void> {
   const codeStale = graphify !== null && committed.length > 0 && (await touchedSince($, cwd, graphify, [...new Set(committed)])).length > 0
   const docsWaiting = graphify !== null && Number((await $.fs.read(`${cwd}/${DOCS_SINCE}`).catch(() => '')).trim()) > 0
   const graphStale = codeStale || docsWaiting
-  await update($, project, () => ({ start, install, build, graphify, graphStale, github: repo, branch, ponytail, git: isRepo, pending, behind, changed, lastCommit }))
+  await update($, project, () => ({ start, install, build, graphify, graphStale, graphRule, github: repo, branch, ponytail, git: isRepo, pending, behind, changed, lastCommit }))
 }
 
 /** Keeps the rate-limit windows the band draws. */
@@ -924,7 +959,7 @@ function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns:
     <Button key="github:start" variant={nudge ? 'primary' : 'secondary'} label={`↑ Save Changes${proj.changed ? ` (${proj.changed})` : ''}`} onPress={() => void prepareGithub($)} />
   )
   // Setup Project leaves once GitHub, graphify and Ponytail are all on.
-  const setupButton = (!proj.github || !proj.graphify || !proj.ponytail) && (
+  const setupButton = (!proj.github || !proj.graphify || !proj.graphRule || !proj.ponytail) && (
     <Button key="project:setup" variant="secondary" label="⚙ Setup Project" onPress={() => void setupProject($)} />
   )
   // Update Graph is there while commits newer than the graph wait to go into it.
@@ -948,7 +983,8 @@ function actionBar($: EngineInterface, ui: Ui, proj: ProjectScripts, scriptRuns:
   // The checks: a filled green dot when it is on, a hollow dim one when it is not, a yellow one when out of date.
   const checks = [
     { label: 'GitHub', on: !!proj.github, stale: false },
-    { label: 'graphify', on: proj.graphify !== null, stale: proj.graphStale },
+    // Yellow too while the graph is there but CLAUDE.md does not tell Claude to read it (Setup Project adds the rule).
+    { label: 'graphify', on: proj.graphify !== null, stale: proj.graphStale || (proj.graphify !== null && !proj.graphRule) },
     { label: 'Ponytail', on: !!proj.ponytail, stale: false },
   ]
   // The 5-hour and weekly limits as bars; a window past its reset reads empty until the next response.

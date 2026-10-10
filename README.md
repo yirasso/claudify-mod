@@ -46,7 +46,7 @@ Claude Code is great at changing code. The chores around it, starting the dev se
 
 - **Knowledge graph** ([graphify](https://github.com/Graphify-Labs/graphify)): after each turn that changed code, the code graph is rebuilt with no model; graphify's git hook (installed for you) rebuilds it after each commit; docs a commit or a pull brought are read by Claude Sonnet with no button. A yellow dot and **↻ Update Graph** appear only if something is left behind.
 - **Types**: after each turn that changed code, your typecheck runs in the background (your `typecheck` script, `tsc --noEmit`, or `cargo check`). A red **● Types** shows the errors and **✦ Send type errors to Claude**.
-- **⚙ Setup Project**: one click turns a folder into a full project: [Ponytail](https://github.com/DietrichGebert/ponytail) on, graph built, private GitHub repo created.
+- **⚙ Setup Project**: one click turns a folder into a full project: [Ponytail](https://github.com/DietrichGebert/ponytail) on, graph built (with graphify's rule added to `CLAUDE.md`, so Claude actually reads it), private GitHub repo created.
 
 ### At a glance
 
