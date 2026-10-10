@@ -4,11 +4,11 @@ A Claude Code plugin (a "mod": function hooks, no MCP server) with one part: the
 
 The pane with the session's skills, MCP servers, connectors and plugins moved on 2026-10-09 to its own plugin, `setup-info`, in `C:\Dev\Claude Setup Info`.
 
-The owner is Tomás. He talks in European Portuguese (never Brazilian); the plugin's UI and code are in English. Repo: https://github.com/yirasso/claudify (branch `main`), **public since 2026-10-09** under the MIT license: others install it with `/plugin marketplace add yirasso/claudify` and `/plugin install claudify@yirasso`. Keep secrets and personal data out of commits; the README (with `docs/band.png`) is the public face.
+The owner is Tomás. He talks in European Portuguese (never Brazilian); the plugin's UI and code are in English. Repo: https://github.com/yirasso/claudify-mod (branch `main`), **public since 2026-10-09** under the MIT license: others install it with `/plugin marketplace add yirasso/claudify-mod` and `/plugin install claudify@yirasso`. Keep secrets and personal data out of commits; the README (with `docs/band.png`) is the public face.
 
 ## Install and reload
 
-- **Installed for Tomás from GitHub** as `claudify@yirasso`: the marketplace `yirasso` (renamed from `tomas-plugins` on 2026-10-09) is `yirasso/claudify` (`.claude-plugin/marketplace.json`, with the plugin at `source: "./"`). Claude Code runs a copy in `~/.claude/plugins/cache/yirasso/claudify/<version>/`, not this folder.
+- **Installed for Tomás from GitHub** as `claudify@yirasso`: the marketplace `yirasso` (renamed from `tomas-plugins` on 2026-10-09) is `yirasso/claudify-mod` (`.claude-plugin/marketplace.json`, with the plugin at `source: "./"`). Claude Code runs a copy in `~/.claude/plugins/cache/yirasso/claudify/<version>/`, not this folder.
   - **To ship a change:** bump `version` in `.claude-plugin/plugin.json`, commit, push to `main`, then `claude plugin update claudify@yirasso` and `/reload-plugins`.
   - **To try edits before pushing:** `claude --plugin-dir C:\Dev\Claudify`.
 - **The `claude` CLI is not on PATH.** The binary is `%APPDATA%\Claude\claude-code\<version>\<hash>\claude.exe` (it was `2.1.293\83cb0bd7fed4` on 9 Oct 2026).
@@ -81,3 +81,13 @@ The owner is Tomás. He talks in European Portuguese (never Brazilian); the plug
 
 - Not confirmed in Claude Desktop: how the band's buttons look in Claude Desktop.
 - In Claude Desktop the band is missing in a new session and after `/clear` until the first message is sent; a redraw on `session.end` (`reason: 'clear'`) did not help (0.5.5, reverted in 0.5.6). Most likely the app starts the session's process only with the first message, so no mod can draw before it.
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+Rules:
+- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).

@@ -6,7 +6,7 @@
 
 Start the app, save to GitHub, keep a knowledge graph and a typecheck current, and watch your usage limits, all without leaving the conversation or spending a model turn on chores.
 
-[![Version](https://img.shields.io/github/package-json/v/yirasso/claudify?filename=.claude-plugin%2Fplugin.json&label=version&color=D97757)](.claude-plugin/plugin.json)
+[![Version](https://img.shields.io/github/package-json/v/yirasso/claudify-mod?filename=.claude-plugin%2Fplugin.json&label=version&color=D97757)](.claude-plugin/plugin.json)
 [![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-D97757)](https://docs.claude.com/en/docs/claude-code)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Platforms](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey)](#requirements)
@@ -62,7 +62,7 @@ Finished work folds back after 2 seconds, so the band stays one line most of the
 In Claude Code:
 
 ```bash
-/plugin marketplace add yirasso/claudify
+/plugin marketplace add yirasso/claudify-mod
 /plugin install claudify@yirasso
 ```
 
@@ -96,8 +96,8 @@ Nothing is sent anywhere else. Secrets are detected locally and never shown or s
 ## Develop
 
 ```bash
-git clone https://github.com/yirasso/claudify.git
-cd claudify
+git clone https://github.com/yirasso/claudify-mod.git
+cd claudify-mod
 claude plugin validate .
 claude plugin test .
 ```

@@ -1,12 +1,12 @@
 {
   "name": "claudify",
-  "version": "0.9.2",
+  "version": "0.9.3",
   "description": "Your project's everyday actions in a band above the Claude Code prompt: start the app, save to GitHub with Undo, pull, build, a knowledge graph and a typecheck that follow your work, and your usage limits.",
   "author": {
     "name": "Tomas Girao"
   },
-  "homepage": "https://github.com/yirasso/claudify",
-  "repository": "https://github.com/yirasso/claudify",
+  "homepage": "https://github.com/yirasso/claudify-mod",
+  "repository": "https://github.com/yirasso/claudify-mod",
   "license": "MIT",
   "keywords": [
     "claude-code",
