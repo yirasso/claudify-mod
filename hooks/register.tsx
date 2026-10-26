@@ -1155,9 +1155,11 @@ export const register: Register = on => {
     return started
   })
 
-  // The band above the prompt: the project's actions, always at hand.
+  // The band above the prompt: the project's actions, always at hand. What the plugins beneath draw there
+  // (another mod's band) is kept, above the bar, so the bar stays against the prompt.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    if (e.props.hasSurvey || (await read($, off))) return next(e)
+    const below = await next(e)
+    if (e.props.hasSurvey || (await read($, off))) return below
     const { Box } = $.ui.resolve(e)
     const proj = await read($, project)
     const scriptRuns = await read($, runs)
@@ -1169,7 +1171,7 @@ export const register: Register = on => {
     const hasVscode = await read($, vscode)
     const check = await read($, types)
     const missing = await read($, health)
-    return <Box flexDirection="column">{actionBar($, $.ui.resolve(e), proj, scriptRuns, gh, usage, base, job, notifyOn, hasVscode, check, missing)}</Box>
+    return <Box flexDirection="column">{below}{actionBar($, $.ui.resolve(e), proj, scriptRuns, gh, usage, base, job, notifyOn, hasVscode, check, missing)}</Box>
   })
 
   // /claudify off hides the band and stops its automatic work in this project; /claudify brings them back.
