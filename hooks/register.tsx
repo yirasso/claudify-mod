@@ -1158,8 +1158,8 @@ export const register: Register = on => {
   // The band above the prompt: the project's actions, always at hand. What the plugins beneath draw there
   // (another mod's band) is kept, above the bar, so the bar stays against the prompt.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    if (e.props.hasSurvey || (await read($, off))) return next(e)
     const below = await next(e).catch(() => null)
-    if (e.props.hasSurvey || (await read($, off))) return below
     const { Box } = $.ui.resolve(e)
     const proj = await read($, project)
     const scriptRuns = await read($, runs)
